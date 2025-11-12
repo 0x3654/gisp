@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir \
     sentence-transformers \
     transliterate \
     pymorphy2 \
+    nltk \
     requests \
     psycopg2-binary
 
