@@ -10,10 +10,11 @@
 
 # Установка
 
-1. Клонируйте репозиторий и перейдите в каталог проекта:
+1. Скачайте архив (tar.gz) и распакуйте в каталог проекта:
    ```bash
-   git clone https://github.com/0x3654/gisp.git
-   cd gisp
+   curl -L https://github.com/0x3654/gisp/archive/refs/heads/master.tar.gz \
+     | tar -xz
+   mv gisp-master gisp && cd gisp
    ```
 2. Создайте локальные конфиги из примеров:
    ```bash
@@ -29,16 +30,20 @@
    > Пример:
    ```json
    {
-     "сода": ["гидрокарбонат натрия", "пищевая сода"]
+     "сода": [
+    "гидрокарбонат натрия",
+    "пищевая сода"]
    }
    ```
 5. Запустите стек:
    ```bash
-   docker compose up -d --build postgres_registry api import semantic openwebui
+   docker compose up -d --build postgres_registry api import semantic openwebui &&
+   docker compose run --rm openwebui-sync
    ```
-   После правок чат-скрипта синхронизируйте функцию:
+   Скрипт синхронизации (`run_openwebui_sync.sh`) нужен при первом запуске, чтобы загрузить функцию в OpenWebUI, и каждый раз после правок `services/openwebui/tools/reestr_openwebui.py`.
+   Для построения/обновления семантических эмбеддингов запустите воркер (профиль `embeddings`). Процесс ресурсоёмкий и может занять значительное время при первом запуске:
    ```bash
-   ./scripts/run_openwebui_sync.sh
+   docker compose run --rm embeddings-worker
    ```
 
 
