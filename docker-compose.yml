@@ -58,6 +58,7 @@ services:
       # - ./.env:/app/.env:ro
     depends_on:
       - postgres_registry
+      - semantic
     restart: unless-stopped
     labels:
       - "com.centurylinklabs.watchtower.enable=false"
@@ -119,6 +120,9 @@ services:
     volumes:
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      - postgres_registry
+      - semantic
     restart: unless-stopped
     networks:
       - internal
