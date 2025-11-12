@@ -122,7 +122,6 @@ services:
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       - postgres_registry
-      - semantic
     restart: unless-stopped
     networks:
       - internal
