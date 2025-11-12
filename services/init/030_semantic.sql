@@ -1,4 +1,4 @@
-SET search_path TO registry;
+SET search_path TO registry, public;
 
 CREATE TABLE IF NOT EXISTS registry.semantic_items (
   reestr_id       BIGINT PRIMARY KEY REFERENCES registry.reestr(id) ON DELETE CASCADE,
