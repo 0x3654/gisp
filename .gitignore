@@ -1,0 +1,23 @@
+*.DS_Store
+dumps/
+
+.idea/
+_query/
+files/*
+logs/*
+
+# environments
+*.env
+
+services/n8n*
+services/postgres/data/
+services/openwebui/data/
+services/openwebui/tools/__pycache__/
+
+services/semantic/model/
+services/semantic/synonyms.json
+services/semantic/__pycache__/
+
+workflow.excalidraw
+*.bak
+*.todo

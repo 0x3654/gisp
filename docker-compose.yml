@@ -1,0 +1,165 @@
+name: registry
+services:
+  postgres_registry:
+    image: pgvector/pgvector:pg16
+    container_name: registry-pg
+    env_file: .env
+    command: >
+      postgres
+      -c shared_preload_libraries=pg_prewarm
+      -c pg_prewarm.autoprewarm=on
+      -c pg_prewarm.autoprewarm_interval=${PG_AUTOPREWARM_INTERVAL:-300}
+      -c pg_prewarm.autoprewarm_startup=on
+    ports:
+      - '5432:5432'
+    volumes:
+      - ./services/postgres/data:/var/lib/postgresql/data
+      - ./services/init:/docker-entrypoint-initdb.d:ro
+      # - ./imports:/imports
+      # - ./scripts:/scripts
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+    networks:
+       - internal
+       - default
+  api:
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile
+    container_name: registry-api
+    env_file: .env
+    ports:
+      - '8000:8000'
+    depends_on:
+      - postgres_registry
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    volumes:
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+        - internal
+  import:
+    build:
+      context: ./services/import
+      dockerfile: Dockerfile
+    container_name: registry-import
+    env_file: .env
+    environment:
+      - TZ=Asia/Tbilisi
+    volumes:
+      - ./logs:/var/log/registry
+      - ./services/import:/import
+      - ./files:/files:cached
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+      # - ./.env:/app/.env:ro
+    depends_on:
+      - postgres_registry
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    networks:
+      - internal
+      - default
+  openwebui:
+    image: ghcr.io/open-webui/open-webui
+    container_name: openwebui
+    ports:
+      - '3000:8080'
+    volumes:
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+      - ./services/openwebui/data:/app/backend/data
+    restart: unless-stopped
+    networks:
+      - internal
+      - default
+  openwebui-sync:
+    image: python:3.12-slim
+    container_name: openwebui-sync
+    profiles: ["tools"]
+    volumes:
+      - ./services/openwebui/tools:/opt/:ro
+      - ./services/openwebui/data:/data
+    working_dir: /opt
+    entrypoint:
+      - python
+      - /opt/sync_openwebui_function.py
+      - --script
+      - /opt/reestr_openwebui.py
+      - --db
+      - /data/webui.db
+      - --function-id
+      - reestr
+    depends_on:
+      - openwebui
+    restart: "no"
+  semantic:
+    build:
+      context: ./services/semantic
+      dockerfile: Dockerfile
+    container_name: semantic_service
+    env_file: .env
+    environment:
+      - PYTHONPATH=/app
+    command:
+      - uvicorn
+      - semantic_service:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8010"
+      - --workers
+      - "4"
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    volumes:
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+    networks:
+      - internal
+  embeddings-worker:
+    build:
+      context: .
+      dockerfile: ./services/import/Dockerfile.embeddings
+    profiles:
+      - embeddings
+    env_file: .env
+    working_dir: /app
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    volumes:
+      - .:/app
+    depends_on:
+      - postgres_registry
+      - semantic
+    networks:
+      - internal
+    restart: "no"
+    environment:
+      FORCE: ${FORCE:-0}
+      DRY_RUN: ${DRY_RUN:-0}
+      SOURCE_FILES: ${SOURCE_FILES:-}
+      EMBED_IDS: ${EMBED_IDS:-}
+      LIMIT: ${LIMIT:-}
+      EXTRA_EMBED_ARGS: ${EXTRA_EMBED_ARGS:-}
+      SEMANTIC_URL_OVERRIDE: ${SEMANTIC_URL_OVERRIDE:-}
+      SHARD_INDEX: "0"
+      SHARD_COUNT: "1"
+      BATCH_SIZE: "400"
+    command: >
+      bash -lc "set -e;
+      ./services/import/scripts/run_embeddings_worker.sh"
+    deploy:
+      restart_policy:
+        condition: none
+networks:
+   internal:
+     internal: true
+   default:
+    name: registry-net
+    driver: bridge

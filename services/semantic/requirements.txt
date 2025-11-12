@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pymorphy2
+nltk
+sentence-transformers
+transliterate
+requests
+psycopg2-binary
