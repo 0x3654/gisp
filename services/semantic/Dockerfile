@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir \
     uvicorn \
     sentence-transformers \
     transliterate \
+    pymorphy2 \
     requests \
     psycopg2-binary
 
