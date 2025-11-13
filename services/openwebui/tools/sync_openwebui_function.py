@@ -77,20 +77,28 @@ def parse_base_url(source: str) -> str | None:
     return match.group(1) if match else None
 
 
+def get_table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    cur = conn.execute(f"PRAGMA table_info('{table}')")
+    return {row[1] for row in cur.fetchall()}
+
+
+def _pick_first_id(conn: sqlite3.Connection, table: str) -> str | None:
+    columns = get_table_columns(conn, table)
+    order_clause = " ORDER BY created_at" if "created_at" in columns else ""
+    row = conn.execute(f"SELECT id FROM {table}{order_clause} LIMIT 1").fetchone()
+    return row[0] if row else None
+
+
 def ensure_user_id(conn: sqlite3.Connection) -> str:
     """
     Locate an existing user id to associate the function with.
     """
-    row = conn.execute(
-        "SELECT id FROM function ORDER BY created_at LIMIT 1"
-    ).fetchone()
-    if row:
-        return row[0]
-    row = conn.execute(
-        "SELECT id FROM auth ORDER BY created_at LIMIT 1"
-    ).fetchone()
-    if row:
-        return row[0]
+    candidate = _pick_first_id(conn, "function")
+    if candidate:
+        return candidate
+    candidate = _pick_first_id(conn, "auth")
+    if candidate:
+        return candidate
     raise RuntimeError("Unable to determine Open WebUI user id.")
 
 
@@ -146,11 +154,15 @@ def sync_function(
     base_url = parse_base_url(script_text)
 
     conn = sqlite3.connect(db_path)
+    function_columns = get_table_columns(conn, "function")
     existing = load_existing(conn, function_id)
     now = int(time.time())
 
     meta = merge_meta(existing.get("meta") if existing else None, manifest)
     valves = merge_valves(existing.get("valves") if existing else None, base_url)
+    def from_existing(key: str, default: Any) -> Any:
+        return existing.get(key, default) if existing else default
+
     payload = {
         "id": function_id,
         "user_id": existing["user_id"] if existing else ensure_user_id(conn),
@@ -159,34 +171,47 @@ def sync_function(
         "content": script_text,
         "meta": json.dumps(meta, ensure_ascii=False),
         "valves": json.dumps(valves, ensure_ascii=False),
-        "is_active": existing["is_active"] if existing else 1,
-        "is_global": existing["is_global"] if existing else 0,
-        "created_at": existing["created_at"] if existing else now,
+        "is_active": from_existing("is_active", 1),
+        "is_global": from_existing("is_global", 0),
+        "created_at": from_existing("created_at", now),
         "updated_at": now,
     }
 
     with conn:
         if existing:
-            conn.execute(
-                """
-                UPDATE function
-                SET name = :name,
-                    type = :type,
-                    content = :content,
-                    meta = :meta,
-                    valves = :valves,
-                    updated_at = :updated_at
-                WHERE id = :id
-                """,
-                payload,
-            )
+            update_fields = []
+            for column in ("name", "type", "content", "meta", "valves", "updated_at"):
+                if column in function_columns:
+                    update_fields.append(f"{column} = :{column}")
+            if update_fields:
+                conn.execute(
+                    f"""
+                    UPDATE function
+                    SET {', '.join(update_fields)}
+                    WHERE id = :id
+                    """,
+                    payload,
+                )
         else:
+            insert_order = [
+                "id",
+                "user_id",
+                "name",
+                "type",
+                "content",
+                "meta",
+                "valves",
+                "created_at",
+                "updated_at",
+                "is_active",
+                "is_global",
+            ]
+            insert_columns = [col for col in insert_order if col in function_columns]
+            placeholders = [f":{col}" for col in insert_columns]
             conn.execute(
-                """
-                INSERT INTO function
-                    (id, user_id, name, type, content, meta, valves, created_at, updated_at, is_active, is_global)
-                VALUES
-                    (:id, :user_id, :name, :type, :content, :meta, :valves, :created_at, :updated_at, :is_active, :is_global)
+                f"""
+                INSERT INTO function ({', '.join(insert_columns)})
+                VALUES ({', '.join(placeholders)})
                 """,
                 payload,
             )

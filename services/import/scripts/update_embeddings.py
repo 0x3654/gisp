@@ -197,7 +197,7 @@ def fetch_semantic(
     url: str,
     text: str,
 ) -> dict:
-    payload = {"text": text, "debug": False}
+    payload = {"text": text, "debug": False, "normalize": False}
     resp = session.post(url, json=payload, timeout=20)
     resp.raise_for_status()
     return resp.json()
@@ -240,23 +240,22 @@ def main() -> int:
                     for reestr_id, productname in rows:
                         row_index += 1
                         total_selected += 1
-                        productname = productname.strip()
-                        if not productname:
+                        original_text = (productname or "").strip()
+                        if not original_text:
                             continue
                         if args.dry_run:
-                            print(f"[DRY-RUN] id={reestr_id} name={productname}", flush=True)
+                            print(f"[DRY-RUN] id={reestr_id} name={original_text}", flush=True)
                             continue
                         savepoint = f"sp_{row_index}"
                         if not args.dry_run:
                             write_cur.execute(f"SAVEPOINT {savepoint}")
                         try:
-                            data = fetch_semantic(session, args.semantic_url, productname)
-                            normalized = (data.get("normalized") or "").strip()
+                            data = fetch_semantic(session, args.semantic_url, original_text)
                             synonyms = data.get("synonyms_applied") or []
                             embedding = data.get("embedding")
                             if not isinstance(embedding, list):
                                 raise ValueError("Ответ semantic_service не содержит embedding")
-                            upsert_embedding(write_cur, reestr_id, normalized, synonyms, embedding)
+                            upsert_embedding(write_cur, reestr_id, original_text, synonyms, embedding)
                             if not args.dry_run:
                                 write_cur.execute(f"RELEASE SAVEPOINT {savepoint}")
                             total_processed += 1
