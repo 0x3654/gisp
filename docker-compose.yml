@@ -3,6 +3,7 @@ services:
   postgres_registry:
     image: pgvector/pgvector:pg16
     container_name: registry-pg
+    shm_size: "2g"
     env_file: .env
     command: >
       postgres
@@ -53,9 +54,8 @@ services:
       - ./logs:/var/log/registry
       - ./services/import:/import
       - ./files:/files:cached
-      - /etc/timezone:/etc/timezone:ro
-      - /etc/localtime:/etc/localtime:ro
-      # - ./.env:/app/.env:ro
+      # - /etc/timezone:/etc/timezone:ro
+      # - /etc/localtime:/etc/localtime:ro
     depends_on:
       - postgres_registry
       - semantic

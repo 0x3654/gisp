@@ -48,12 +48,29 @@ FROM   (VALUES ('registry.reestr'::regclass),
 SQL
 } | "${PSQL_BASE[@]}"
 
+# Пытаемся убедиться, что расширение pg_prewarm доступно (создаём при необходимости).
 {
 cat <<'SQL'
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_prewarm') THEN
+    CREATE EXTENSION pg_prewarm;
+  END IF;
+END $$;
+SQL
+} | "${PSQL_BASE[@]}" >/dev/null 2>&1 || echo "[WARN] Не удалось создать расширение pg_prewarm (недостаточно прав?)."
+
+HAS_PG_PREWARM=$("${PSQL_BASE[@]}" -tAc "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'pg_prewarm');")
+if [[ "$HAS_PG_PREWARM" == "t" ]]; then
+  {
+  cat <<'SQL'
 SELECT 'registry.semantic_items' AS relation, pg_prewarm('registry.semantic_items', 'buffer');
 SELECT 'registry.reestr' AS relation, pg_prewarm('registry.reestr', 'buffer');
 SQL
-} | "${PSQL_BASE[@]}" || echo "[WARN] pg_prewarm вызов завершился с ошибкой (возможно, не загружен модуль)."
+  } | "${PSQL_BASE[@]}"
+else
+  echo "[WARN] pg_prewarm недоступен, прогрев пропущен."
+fi
 
 unset PGPASSWORD
 

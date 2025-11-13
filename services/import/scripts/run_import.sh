@@ -93,13 +93,19 @@ if [[ $status -ne 0 ]]; then
 $(date '+%d.%m.%Y %H:%M:%S')"
 else
   # даже если формально успешный код, проверяем наличие ошибок в логе
+  RAW_HOST=$(hostname -f 2>/dev/null || hostname)
+  if [[ "$RAW_HOST" =~ ^[0-9a-f]{12}$ ]]; then
+    RAW_HOST="registry-node-${RAW_HOST:0:6}"
+  fi
+  HOST_ID="${REGISTRY_NODE_NAME:-$RAW_HOST}"
+
   if grep -qiE "(psql: error|Traceback|Exception)" "$LOG_FILE"; then
     echo "[WARN] Обнаружены сообщения об ошибках в логе" >> "$LOG_FILE"
     send_telegram "⚠️ Ошибка импорта POSTGRES:
-$(date '+%d.%m.%Y %H:%M:%S')"
+$(date '+%d.%m.%Y %H:%M:%S') (${HOST_ID})"
   else
     send_telegram "✅ Импорт завершён успешно:
-$(date '+%d.%m.%Y %H:%M:%S')"
+$(date '+%d.%m.%Y %H:%M:%S') (${HOST_ID})"
   fi
 fi
 
