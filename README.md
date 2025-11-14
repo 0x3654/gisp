@@ -111,8 +111,7 @@ curl -fsSL https://raw.githubusercontent.com/0x3654/gisp/master/scripts/bootstra
 > Уведомления о статусе импортов отправляются в Telegram (если заданы `BOT_TOKEN`/`CHAT_ID`).
 
 > ## **Контейнер semantic**
-> FastAPI-шлюз для REST-запросов строит эмбеддинги и расширяет запросы. 
-> В образ сразу запечена модель `paraphrase-multilingual-MiniLM-L12-v2`, с учетом synonyms.json.
+> FastAPI-шлюз для REST-запросов строит эмбеддинги и расширяет запросы. В образ сразу запечена модель `paraphrase-multilingual-MiniLM-L12-v2`, с учетом `synonyms.json`.
 
 > ## **Контейнер embeddings-worker**
 > Одноразовый воркер для массового пересчёта эмбеддингов. Стартует по команде `docker compose run --rm embeddings-worker`, поддерживает шардирование и форс-пересчёт через переменные окружения.

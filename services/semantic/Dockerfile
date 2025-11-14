@@ -16,10 +16,13 @@ RUN pip install --no-cache-dir \
         "huggingface_hub>=0.23.2"
 
 ARG HF_MODEL_ID="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+ARG HF_ENDPOINT="https://huggingface.co"
+ARG HF_TOKEN=""
+
 ENV HF_MODEL_ID=${HF_MODEL_ID} \
-    MODEL_DIR=/app/model \
-    TRANSFORMERS_OFFLINE=1 \
-    HF_HUB_OFFLINE=1
+    HF_ENDPOINT=${HF_ENDPOINT} \
+    HF_TOKEN=${HF_TOKEN} \
+    MODEL_DIR=/app/model
 
 RUN python - <<'PY' && rm -rf /root/.cache/huggingface
 import os
@@ -27,6 +30,8 @@ from huggingface_hub import snapshot_download
 
 repo_id = os.environ.get("HF_MODEL_ID")
 target = os.environ.get("MODEL_DIR", "/app/model")
+token = os.environ.get("HF_TOKEN") or None
+endpoint = os.environ.get("HF_ENDPOINT") or None
 
 snapshot_download(
     repo_id=repo_id,
@@ -47,8 +52,13 @@ snapshot_download(
         "model.safetensors",
         "pytorch_model.bin",
     ],
+    token=token,
+    endpoint=endpoint,
 )
 PY
+
+ENV TRANSFORMERS_OFFLINE=1 \
+    HF_HUB_OFFLINE=1
 
 EXPOSE 8010
 
