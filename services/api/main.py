@@ -147,9 +147,7 @@ def build_filter_clauses(
 
     return clauses, params
 
-SEMANTIC_URL = os.getenv(
-    "SEMANTIC_URL", "http://semantic_service:8010/semantic_normalize"
-)
+SEMANTIC_URL = os.getenv("SEMANTIC_URL", "http://semantic:8010/semantic_normalize")
 
 
 def _vector_literal(values: List[float]) -> str:

@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir \
         nltk \
         requests \
         psycopg2-binary \
-        "huggingface_hub>=0.23.2"
+        "huggingface_hub==0.23.2"
 
 ARG HF_MODEL_ID="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 ARG HF_ENDPOINT="https://huggingface.co"
@@ -22,9 +22,7 @@ ARG HF_TOKEN=""
 ENV HF_MODEL_ID=${HF_MODEL_ID} \
     HF_ENDPOINT=${HF_ENDPOINT} \
     HF_TOKEN=${HF_TOKEN} \
-    MODEL_DIR=/app/model \
-    HF_HUB_OFFLINE=0 \
-    TRANSFORMERS_OFFLINE=0
+    MODEL_DIR=/app/model
 
 RUN if [ -n "$HF_TOKEN" ]; then \
         echo "HF_TOKEN: provided"; \

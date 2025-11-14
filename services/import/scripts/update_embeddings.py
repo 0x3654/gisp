@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Обновляет таблицу registry.semantic_items, получая данные из semantic_service.
+Обновляет таблицу registry.semantic_items, получая данные из сервиса semantic.
 
 Использование:
   python update_embeddings.py [--source-file FILE] [--limit N] [--batch-size N] [--force] [--dry-run]
@@ -31,7 +31,7 @@ else:
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-SEMANTIC_URL_DEFAULT = "http://semantic_service:8010/semantic_normalize"
+SEMANTIC_URL_DEFAULT = "http://semantic:8010/semantic_normalize"
 
 
 def parse_args() -> argparse.Namespace:
@@ -254,7 +254,7 @@ def main() -> int:
                             synonyms = data.get("synonyms_applied") or []
                             embedding = data.get("embedding")
                             if not isinstance(embedding, list):
-                                raise ValueError("Ответ semantic_service не содержит embedding")
+                                raise ValueError("Ответ semantic не содержит embedding")
                             upsert_embedding(write_cur, reestr_id, original_text, synonyms, embedding)
                             if not args.dry_run:
                                 write_cur.execute(f"RELEASE SAVEPOINT {savepoint}")

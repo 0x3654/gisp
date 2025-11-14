@@ -177,7 +177,7 @@ curl -fsSL https://raw.githubusercontent.com/0x3654/gisp/master/scripts/bootstra
 ---
 
 > **Описание работы:**
-> - API запрашивает embedding у контейнера `semantic_service`, где запрос очищается, нормализуется и расширяется синонимами из `services/semantic/synonyms.json`.
+> - API запрашивает embedding у контейнера `semantic`, где запрос очищается, нормализуется и расширяется синонимами из `services/semantic/synonyms.json`.
 > - Выполняется прогрессивный поиск по таблице `registry.semantic_items` с fallback-листом:
 >   - Начальное ограничение `limit*2`, затем (если результатов мало) лимит удваивается до 800 строк.
 >   - При необходимости TНВЭД «усекается» (10→8→6→4) или полностью отключается, чтобы избежать пустых выборок.
@@ -345,7 +345,7 @@ curl -fsSL https://raw.githubusercontent.com/0x3654/gisp/master/scripts/bootstra
 ##### Словарь синонимов
 - Расположен в `services/semantic/synonyms.json` и содержит пары вида `"ключевое слово": ["вариант1", "вариант2"]`.
 - Храните ключи и значения в нижнем регистре, чтобы совпадения учитывались независимо от исходного написания.
-- После правок пересоберите `semantic_service` (`docker compose build semantic && docker compose up -d semantic`), чтобы обновить кэш модели.
+- После правок пересоберите `semantic` (`docker compose build semantic && docker compose up -d semantic`), чтобы обновить кэш модели.
 - OpenWebUI автоматически подхватит новые синонимы: дополнительные запросы (например, «сода» → «гидрокарбонат натрия») пойдут в работу сразу после пересборки контейнера.
 
 #### `_format_table(rows, meta, max_rows)`

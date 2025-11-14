@@ -13,9 +13,9 @@ import requests
 from html import unescape
 from typing import Dict, Any, List, Tuple, Set
 
-BASE_URL = "http://registry-api:8000/reestr"
-SEMANTIC_URL = "http://semantic_service:8010/semantic_normalize"
-SEMANTIC_REESTR_URL = "http://registry-api:8000/reestr/semantic"
+BASE_URL = "http://api:8000/reestr"
+SEMANTIC_URL = "http://semantic:8010/semantic_normalize"
+SEMANTIC_REESTR_URL = "http://api:8000/reestr/semantic"
 
 TIMEOUT = 10
 DEFAULT_MAX_ROWS = 10
