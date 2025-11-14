@@ -26,6 +26,7 @@ ENV HF_MODEL_ID=${HF_MODEL_ID} \
     HF_HUB_OFFLINE=0 \
     TRANSFORMERS_OFFLINE=0
 
+# Disable offline flags inside the download script to make CI builds deterministic.
 RUN HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 python - <<'PY' && rm -rf /root/.cache/huggingface
 import os
 from huggingface_hub import snapshot_download
@@ -34,6 +35,11 @@ repo_id = os.environ.get("HF_MODEL_ID")
 target = os.environ.get("MODEL_DIR", "/app/model")
 token = os.environ.get("HF_TOKEN") or None
 endpoint = os.environ.get("HF_ENDPOINT") or None
+
+# Temporarily force online mode even if upstream images export offline flags.
+for offline_var in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"):
+    if offline_var in os.environ:
+        os.environ.pop(offline_var)
 
 snapshot_download(
     repo_id=repo_id,
