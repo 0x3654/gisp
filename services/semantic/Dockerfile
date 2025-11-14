@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.6
+
 FROM python:3.10-slim
 
 WORKDIR /app
@@ -17,22 +19,16 @@ RUN pip install --no-cache-dir \
 
 ARG HF_MODEL_ID="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 ARG HF_ENDPOINT="https://huggingface.co"
-ARG HF_TOKEN=""
 
 ENV HF_MODEL_ID=${HF_MODEL_ID} \
     HF_ENDPOINT=${HF_ENDPOINT} \
-    HF_TOKEN=${HF_TOKEN} \
     MODEL_DIR=/app/model
 
-RUN if [ -n "$HF_TOKEN" ]; then \
-        echo "HF_TOKEN: provided"; \
-    else \
-        echo "HF_TOKEN: NOT provided"; \
-    fi
-
 # Скачиваем модель на этапе сборки, чтобы рантайм стартовал сразу с готовыми весами.
-RUN python - <<'PY' && rm -rf /root/.cache/huggingface
+RUN --mount=type=secret,id=hf_token,target=/tmp/hf_token \
+    python - <<'PY' && rm -rf /root/.cache/huggingface
 import os
+from pathlib import Path
 
 for offline_var in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"):
     os.environ.pop(offline_var, None)
@@ -41,13 +37,19 @@ from huggingface_hub import snapshot_download
 
 repo_id = os.environ.get("HF_MODEL_ID")
 target = os.environ.get("MODEL_DIR", "/app/model")
-token = os.environ.get("HF_TOKEN") or None
+token_file = Path("/tmp/hf_token")
+token = None
+
+if token_file.is_file():
+    token = token_file.read_text().strip() or None
+elif os.environ.get("HF_TOKEN"):
+    # Allow opt-in via env when the build secret is not available.
+    token = os.environ.get("HF_TOKEN")
 endpoint = os.environ.get("HF_ENDPOINT") or None
 
 snapshot_download(
     repo_id=repo_id,
     local_dir=target,
-    local_dir_use_symlinks=False,
     allow_patterns=[
         "README.md",
         "config.json",
