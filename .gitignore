@@ -8,6 +8,8 @@ logs/*
 
 # environments
 *.env
+.venv/
+.uv/
 
 services/postgres/data/
 services/openwebui/data/

@@ -45,6 +45,7 @@ jobs:
         with:
           context: ./services/semantic
           push: true
+          no-cache: true
           build-args: |
             HF_TOKEN=${{ env.HF_TOKEN }}
           platforms: linux/amd64,linux/arm64
