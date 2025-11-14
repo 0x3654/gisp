@@ -71,7 +71,7 @@ curl -fsSL https://raw.githubusercontent.com/0x3654/gisp/master/scripts/bootstra
    ```
 6. *(опционально)* Загрузите стартовый дамп (reestr + load_log + semantic_items) через готовый контейнер:
    ```bash
-   COMPOSE_PROFILES=starter docker compose run --rm starter-dump
+   COMPOSE_PROFILES=starter docker compose run -T --rm starter-dump
    ```
 
 7. Запустите стек:

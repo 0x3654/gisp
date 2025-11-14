@@ -64,7 +64,7 @@ mkdir -p services/openwebui/data
 copy_if_missing "services/openwebui/webui.db.example" "services/openwebui/data/webui.db"
 
 info "Restoring starter dump via docker compose (profile starter)"
-COMPOSE_PROFILES=starter sudo docker compose run --rm starter-dump
+sudo env COMPOSE_PROFILES=starter docker compose run -T --rm starter-dump
 
 info "Starting services: ${SERVICES[*]}"
 sudo docker compose up -d --build "${SERVICES[@]}"
