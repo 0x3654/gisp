@@ -86,7 +86,7 @@ services:
       - openwebui
     restart: "no"
   semantic:
-    image: ghcr.io/0x3654/gisp-semantic:latest
+    image: docker.io/0x3654/gisp-semantic:latest
     container_name: semantic_service
     env_file: .env
     environment:
@@ -145,7 +145,7 @@ services:
       restart_policy:
         condition: none
   starter-dump:
-    image: ghcr.io/0x3654/gisp-starter:latest
+    image: docker.io/0x3654/gisp-starter:latest
     container_name: gisp-starter-dump
     profiles:
       - starter
