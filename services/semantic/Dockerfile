@@ -6,10 +6,22 @@ WORKDIR /app
 
 COPY . /app/
 
+ARG TORCH_VERSION=2.3.1
+ARG TORCHVISION_VERSION=0.18.1
+ARG TORCHAUDIO_VERSION=2.3.1
+ARG PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cpu"
+
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir \
+        --index-url ${PYTORCH_INDEX_URL} \
+        torch==${TORCH_VERSION} \
+        torchvision==${TORCHVISION_VERSION} \
+        torchaudio==${TORCHAUDIO_VERSION}
+
 RUN pip install --no-cache-dir \
         fastapi \
         uvicorn \
-        sentence-transformers \
+        sentence-transformers==3.0.1 \
         transliterate \
         pymorphy2 \
         nltk \
