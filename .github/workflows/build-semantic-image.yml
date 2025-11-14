@@ -30,6 +30,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Check HF_TOKEN availability
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -n "$HF_TOKEN" ]; then
+            echo "HF_TOKEN: provided"
+          else
+            echo "::warning::HF_TOKEN is NOT provided"
+          fi
+
       - name: Build and push semantic image (multi-arch)
         uses: docker/build-push-action@v5
         with:
