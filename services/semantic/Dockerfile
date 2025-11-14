@@ -26,7 +26,7 @@ ENV HF_MODEL_ID=${HF_MODEL_ID} \
     HF_HUB_OFFLINE=0 \
     TRANSFORMERS_OFFLINE=0
 
-RUN python - <<'PY' && rm -rf /root/.cache/huggingface
+RUN HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 python - <<'PY' && rm -rf /root/.cache/huggingface
 import os
 from huggingface_hub import snapshot_download
 
