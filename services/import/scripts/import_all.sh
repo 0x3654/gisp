@@ -118,7 +118,10 @@ if [[ ! -s "$tmpfile" ]]; then
   exit 1
 fi
 
-psql_exec_quiet -c "DROP TABLE IF EXISTS registry.tmp_latest_raw"
+psql_exec_quiet -c "
+SET client_min_messages TO warning;
+DROP TABLE IF EXISTS registry.tmp_latest_raw;
+"
 psql_exec_quiet -c "CREATE TABLE registry.tmp_latest_raw (
   Nameoforg text,
   OGRN text,
@@ -153,7 +156,10 @@ psql_exec_quiet <<EOF
 \copy registry.tmp_latest_raw FROM '$(realpath "$tmpfile")' WITH (FORMAT csv, HEADER true, DELIMITER ',', QUOTE '"', ESCAPE '"', ENCODING 'UTF8')
 EOF
 
-psql_exec_quiet -c "DROP TABLE IF EXISTS registry.tmp_latest_norm"
+psql_exec_quiet -c "
+SET client_min_messages TO warning;
+DROP TABLE IF EXISTS registry.tmp_latest_norm;
+"
 psql_exec_quiet -c "
 CREATE TABLE registry.tmp_latest_norm AS
 SELECT DISTINCT
@@ -318,8 +324,14 @@ else
 fi
 
 # Clean up staging tables for the next run
-psql_exec_quiet -c "DROP TABLE IF EXISTS registry.tmp_latest_norm"
-psql_exec_quiet -c "DROP TABLE IF EXISTS registry.tmp_latest_raw"
+psql_exec_quiet -c "
+SET client_min_messages TO warning;
+DROP TABLE IF EXISTS registry.tmp_latest_norm;
+"
+psql_exec_quiet -c "
+SET client_min_messages TO warning;
+DROP TABLE IF EXISTS registry.tmp_latest_raw;
+"
 
 end_time=$(date +%s)
 elapsed=$((end_time - start_time))

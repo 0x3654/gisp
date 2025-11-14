@@ -14,6 +14,36 @@ fi
 : "${LOG_DIR:=/var/log/registry}"
 : "${MAX_LOG_FILES:=2}"
 : "${MAX_CSV_FILES:=2}"
+: "${AUTO_EMBED:=1}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --skip-embeddings|--no-embeddings)
+      AUTO_EMBED=0
+      ;;
+    --with-embeddings)
+      AUTO_EMBED=1
+      ;;
+    -h|--help)
+      cat <<'EOF'
+Usage: run_import.sh [--skip-embeddings|--with-embeddings]
+
+By default the importer recomputes semantic embeddings after each successful
+load (AUTO_EMBED=1). Pass --skip-embeddings or set AUTO_EMBED=0 to import only
+the tabular data and recalculate vectors later via the embeddings worker.
+EOF
+      exit 0
+      ;;
+    *)
+      echo "[ERROR] Неизвестный параметр: $1" >&2
+      echo "       Используйте --help для списка доступных опций." >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
+
+export AUTO_EMBED
 
 mkdir -p "$LOG_DIR" "$FILES_DIR"
 LOG_FILE="$LOG_DIR/run_$(date '+%F_%H-%M').md"
@@ -43,6 +73,9 @@ record_failure() {
 echo "=============================================="
 echo "[$(date '+%d.%m.%Y %H:%M:%S')] Запуск обновления..."
 echo "=============================================="
+if [[ "$AUTO_EMBED" != "1" ]]; then
+  echo "[INFO] Автообновление эмбеддингов отключено (AUTO_EMBED=$AUTO_EMBED)"
+fi
 
   if ! python3 /scripts/download_csvs.py new >/dev/null; then
     cmd_status=$?
