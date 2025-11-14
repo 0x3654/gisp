@@ -24,7 +24,13 @@ ENV HF_MODEL_ID=${HF_MODEL_ID} \
     HF_TOKEN=${HF_TOKEN} \
     MODEL_DIR=/app/model
 
-# Вытаскиваем модель онлайн, а оффлайн-режим включаем уже после загрузки.
+RUN if [ -n "$HF_TOKEN" ]; then \
+        echo "HF_TOKEN: provided"; \
+    else \
+        echo "HF_TOKEN: NOT provided"; \
+    fi
+
+# Скачиваем модель на этапе сборки, чтобы рантайм стартовал сразу с готовыми весами.
 RUN python - <<'PY' && rm -rf /root/.cache/huggingface
 import os
 
@@ -61,9 +67,6 @@ snapshot_download(
     endpoint=endpoint,
 )
 PY
-
-ENV TRANSFORMERS_OFFLINE=1 \
-    HF_HUB_OFFLINE=1
 
 EXPOSE 8010
 
