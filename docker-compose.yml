@@ -2,7 +2,7 @@ name: registry
 services:
   postgres_registry:
     image: pgvector/pgvector:pg16
-    container_name: registry-pg
+    container_name: pg
     shm_size: "2g"
     env_file: .env
     command: >
@@ -24,7 +24,7 @@ services:
     build:
       context: ./services/api
       dockerfile: Dockerfile
-    container_name: registry-api
+    container_name: api
     env_file: .env
     ports:
       - '8000:8000'
@@ -39,7 +39,7 @@ services:
     build:
       context: ./services/import
       dockerfile: Dockerfile
-    container_name: registry-import
+    container_name: import
     env_file: .env
     volumes:
       - ./logs:/var/log/registry
@@ -86,13 +86,13 @@ services:
       - openwebui
     restart: "no"
   semantic:
-    build:
-      context: ./services/semantic
-      dockerfile: Dockerfile
+    image: ghcr.io/0x3654/gisp-semantic:latest
     container_name: semantic_service
     env_file: .env
     environment:
       - PYTHONPATH=/app
+    volumes:
+      - ./services/semantic/synonyms.json:/app/synonyms.json:ro
     command:
       - uvicorn
       - semantic_service:app
@@ -144,6 +144,19 @@ services:
     deploy:
       restart_policy:
         condition: none
+  starter-dump:
+    image: ghcr.io/0x3654/gisp-starter:latest
+    container_name: gisp-starter-dump
+    profiles:
+      - starter
+    env_file: .env
+    environment:
+      - FORCE=${STARTER_FORCE:-0}
+    depends_on:
+      - postgres_registry
+    restart: "no"
+    networks:
+      - internal
 networks:
    internal:
      internal: true

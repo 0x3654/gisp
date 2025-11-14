@@ -13,6 +13,7 @@ services/postgres/data/
 services/openwebui/data/
 services/semantic/synonyms.json
 services/semantic/model
+services/starter/build/
 
 workflow.excalidraw
 *.bak
