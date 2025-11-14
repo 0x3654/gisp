@@ -66,6 +66,9 @@ copy_if_missing "services/openwebui/webui.db.example" "services/openwebui/data/w
 info "Restoring starter dump via docker compose (profile starter)"
 sudo env COMPOSE_PROFILES=starter docker compose run -T --rm starter-dump
 
+info "Cleaning up starter image to free space"
+sudo docker image prune -f --filter "label=org.opencontainers.image.title=gisp-starter" || true
+
 info "Starting services: ${SERVICES[*]}"
 sudo docker compose up -d --build "${SERVICES[@]}"
 
