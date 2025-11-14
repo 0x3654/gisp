@@ -22,7 +22,9 @@ ARG HF_TOKEN=""
 ENV HF_MODEL_ID=${HF_MODEL_ID} \
     HF_ENDPOINT=${HF_ENDPOINT} \
     HF_TOKEN=${HF_TOKEN} \
-    MODEL_DIR=/app/model
+    MODEL_DIR=/app/model \
+    HF_HUB_OFFLINE=0 \
+    TRANSFORMERS_OFFLINE=0
 
 RUN python - <<'PY' && rm -rf /root/.cache/huggingface
 import os
