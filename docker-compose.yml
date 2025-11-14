@@ -16,10 +16,6 @@ services:
     volumes:
       - ./services/postgres/data:/var/lib/postgresql/data
       - ./services/init:/docker-entrypoint-initdb.d:ro
-      # - ./imports:/imports
-      # - ./scripts:/scripts
-      - /etc/timezone:/etc/timezone:ro
-      - /etc/localtime:/etc/localtime:ro
     restart: unless-stopped
     networks:
        - internal
@@ -37,9 +33,6 @@ services:
     restart: unless-stopped
     labels:
       - "com.centurylinklabs.watchtower.enable=false"
-    volumes:
-      - /etc/timezone:/etc/timezone:ro
-      - /etc/localtime:/etc/localtime:ro
     networks:
         - internal
   import:
@@ -48,14 +41,10 @@ services:
       dockerfile: Dockerfile
     container_name: registry-import
     env_file: .env
-    environment:
-      - TZ=Asia/Tbilisi
     volumes:
       - ./logs:/var/log/registry
       - ./services/import:/import
       - ./files:/files:cached
-      # - /etc/timezone:/etc/timezone:ro
-      # - /etc/localtime:/etc/localtime:ro
     depends_on:
       - postgres_registry
       - semantic
@@ -71,8 +60,6 @@ services:
     ports:
       - '3000:8080'
     volumes:
-      - /etc/timezone:/etc/timezone:ro
-      - /etc/localtime:/etc/localtime:ro
       - ./services/openwebui/data:/app/backend/data
     restart: unless-stopped
     networks:
@@ -117,9 +104,6 @@ services:
       - "2"
     labels:
       - "com.centurylinklabs.watchtower.enable=false"
-    volumes:
-      - /etc/timezone:/etc/timezone:ro
-      - /etc/localtime:/etc/localtime:ro
     depends_on:
       - postgres_registry
     restart: unless-stopped
