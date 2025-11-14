@@ -31,10 +31,22 @@ if ! command -v apt >/dev/null 2>&1 && ! command -v apt-get >/dev/null 2>&1; the
   exit 1
 fi
 
-info "Installing Docker, Compose plugin and Git (sudo password may be required)"
-sudo apt update
-sudo apt install -y docker.io docker-compose-plugin git
-sudo usermod -aG docker "$USER" || true
+needs_install=false
+for cmd in docker "docker compose" git; do
+  if ! command -v ${cmd%% *} >/dev/null 2>&1; then
+    needs_install=true
+    break
+  fi
+done
+
+if "$needs_install"; then
+  info "Installing Docker, Compose plugin and Git (sudo password may be required)"
+  sudo apt update
+  sudo apt install -y docker.io docker-compose-plugin git
+  sudo usermod -aG docker "$USER" || true
+else
+  info "Docker, Compose and Git already installed. Skipping apt install."
+fi
 
 if [[ -d "$TARGET_DIR/.git" ]]; then
   info "Directory '$TARGET_DIR' already exists. Reusing existing clone."
