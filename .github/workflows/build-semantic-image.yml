@@ -13,9 +13,9 @@ jobs:
     permissions:
       contents: read
       packages: write
-    env:
-      HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
+    env:
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
