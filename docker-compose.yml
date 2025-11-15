@@ -61,6 +61,22 @@ services:
       - '3333:8080'
     volumes:
       - ./services/openwebui/data:/app/backend/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >
+          import urllib.request, sys;
+          url = "http://127.0.0.1:8080/health";
+          try:
+              urllib.request.urlopen(url, timeout=5);
+          except Exception:
+              sys.exit(1)
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
     restart: unless-stopped
     networks:
       - internal
