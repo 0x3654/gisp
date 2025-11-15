@@ -74,6 +74,6 @@ sudo docker compose up -d --build "${SERVICES[@]}"
 
 cat <<'EOF'
 🎉 GISP stack is up and running.
-- Open http://localhost:3000 for OpenWebUI.
+- Open http://localhost:3333 for OpenWebUI.
 - If 'docker' still requires sudo, log out and back in to refresh group membership.
 EOF
