@@ -67,7 +67,22 @@ info "Restoring starter dump via docker compose (profile starter)"
 sudo env COMPOSE_PROFILES=starter COMPOSE_INTERACTIVE_NO_CLI=1 docker compose run -T --rm starter-dump </dev/null
 
 info "Cleaning up starter image to free space"
-sudo docker image prune -f --filter "label=org.opencontainers.image.title=gisp-starter" || true
+mapfile -t starter_images < <(sudo docker images --filter "label=org.opencontainers.image.title=gisp-starter" --format '{{.ID}} {{.Repository}}:{{.Tag}}')
+
+if ((${#starter_images[@]} == 0)); then
+  info "No gisp-starter images found. Skipping cleanup."
+else
+  starter_image_ids=()
+  starter_image_refs=()
+  for entry in "${starter_images[@]}"; do
+    starter_image_ids+=("${entry%% *}")
+    starter_image_refs+=("${entry#* }")
+  done
+  info "Removing starter image(s): ${starter_image_refs[*]}"
+  if ! sudo docker rmi "${starter_image_ids[@]}" >/dev/null 2>&1; then
+    printf "⚠️ Failed to remove gisp-starter images (they might be in use).\n" >&2
+  fi
+fi
 
 info "Starting services: ${SERVICES[*]}"
 sudo docker compose up -d --build "${SERVICES[@]}"
@@ -75,5 +90,5 @@ sudo docker compose up -d --build "${SERVICES[@]}"
 cat <<'EOF'
 🎉 GISP stack is up and running.
 - Open http://localhost:3333 for OpenWebUI.
-- If 'docker' still requires sudo, log out and back in to refresh group membership.
+login: admin@gisp.ru pass: 123
 EOF
