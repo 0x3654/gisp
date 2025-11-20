@@ -5,7 +5,7 @@ import time
 from datetime import date
 from re import split as re_split
 from decimal import Decimal
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import requests
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -154,6 +154,59 @@ def _vector_literal(values: List[float]) -> str:
     return "[" + ", ".join(str(float(v)) for v in values) + "]"
 
 
+def _parse_synonym_entry(entry: object) -> tuple[str | None, str | None]:
+    source: str | None = None
+    variant: str | None = None
+    if isinstance(entry, dict):
+        source = (entry.get("source") or "").strip() or None
+        variant = (entry.get("variant") or "").strip() or None
+        return source, variant
+    if entry is None:
+        return None, None
+    raw = str(entry).strip()
+    if "→" in raw:
+        parts = raw.split("→", 1)
+    elif "->" in raw:
+        parts = raw.split("->", 1)
+    else:
+        return None, None
+    source = parts[0].strip() or None
+    variant_part = parts[1] if len(parts) > 1 else ""
+    variant = variant_part.strip() or None
+    return source, variant
+
+
+def _normalize_synonym_pairs(entries: List[object]) -> List[Dict[str, str]]:
+    normalized: List[Dict[str, str]] = []
+    seen_pairs: set[tuple[str, str]] = set()
+    seen_sources: set[str] = set()
+    for entry in entries:
+        source, variant = _parse_synonym_entry(entry)
+        if not variant:
+            continue
+        if source and variant.lower() == source.lower():
+            # Пропускаем идентичные пары («термоэтикетка» → «термоэтикетка»)
+            continue
+        source_key = (source or "").lower()
+        if source_key and source_key in seen_sources:
+            continue
+        key = (source_key, variant.lower())
+        if key in seen_pairs:
+            continue
+        seen_pairs.add(key)
+        if source_key:
+            seen_sources.add(source_key)
+        normalized.append(
+            {
+                "source": source or "",
+                "variant": variant,
+            }
+        )
+    return normalized
+
+
+
+
 def _fetch_semantic_embedding(
     text: str, *, normalize: bool, debug: bool = False
 ) -> Tuple[str, List[float], List[str], List[str]]:
@@ -211,9 +264,42 @@ def get_reestr_semantic(
 ):
     try:
         regnumber_norm = normalize_regnumber(regnumber)
-        normalized_text, embedding, synonyms, expansions = _fetch_semantic_embedding(
+        user_query_text = text
+        normalized_text, embedding, raw_synonyms, expansions = _fetch_semantic_embedding(
             text, normalize=False
         )
+        synonyms = _normalize_synonym_pairs(raw_synonyms)
+        synonym_variant_applied: List[Dict[str, str]] = []
+        lowered_text = (text or "").lower()
+        synonyms_to_apply: List[Dict[str, str]] = []
+        for pair in synonyms:
+            variant = (pair.get("variant") or "").strip()
+            if not variant:
+                continue
+            if variant.lower() in lowered_text:
+                continue
+            synonyms_to_apply.append(pair)
+        if synonyms_to_apply:
+            augmented_text = f"{text.rstrip()} {' '.join(p['variant'] for p in synonyms_to_apply)}".strip()
+            try:
+                (
+                    normalized_text_new,
+                    embedding_new,
+                    raw_synonyms_new,
+                    expansions_new,
+                ) = _fetch_semantic_embedding(augmented_text, normalize=False)
+            except HTTPException:
+                pass
+            else:
+                text = augmented_text
+                normalized_text = normalized_text_new
+                embedding = embedding_new
+                expansions = expansions_new
+                synonyms = _normalize_synonym_pairs(raw_synonyms_new)
+                synonym_variant_applied = [
+                    {"source": p.get("source", ""), "variant": p.get("variant", "")}
+                    for p in synonyms_to_apply
+                ]
         embedding_literal = _vector_literal(embedding)
 
         fetch_limit = max(limit * 2, offset + limit)
@@ -421,14 +507,20 @@ def get_reestr_semantic(
                 register_synonym_term(part)
 
         for pair in synonyms:
-            source = (pair.get("source") or "").strip().lower()
-            variant = (pair.get("variant") or "").strip().lower()
+            if isinstance(pair, dict):
+                source = (pair.get("source") or "").strip().lower()
+                variant = (pair.get("variant") or "").strip().lower()
+                pair_type = (pair.get("type") or "synonym").lower()
+            else:
+                source = ""
+                variant = (str(pair) or "").strip().lower()
+                pair_type = "synonym"
             if not variant:
                 continue
             register_synonym_term(variant)
             for part in variant.split():
                 register_synonym_term(part)
-            if primary_token and source == primary_token:
+            if primary_token and source and source == primary_token:
                 primary_synonym_terms.add(variant)
                 for part in variant.split():
                     primary_synonym_terms.add(part)
@@ -550,6 +642,7 @@ def get_reestr_semantic(
         }
         semantic_payload: Dict[str, object] = {
             "original_query": text,
+            "user_query": user_query_text,
             "normalized_query": normalized_text,
             "synonyms": expansions,
             "synonym_pairs": synonyms,
@@ -563,6 +656,8 @@ def get_reestr_semantic(
         }
         if fallback_removed_filters:
             semantic_payload["fallback_removed_filters"] = fallback_removed_filters
+        if synonym_variant_applied:
+            semantic_payload["synonym_variant_applied"] = synonym_variant_applied
 
         return JSONResponse(
             content={

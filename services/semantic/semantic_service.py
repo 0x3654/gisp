@@ -33,19 +33,23 @@ def load_synonyms(path: Path) -> Dict[str, List[str]]:
     if not path.exists():
         return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Invalid synonyms file: {exc}") from exc
 
-
-def build_synonym_lookup(synonyms: Dict[str, List[str]]) -> Dict[str, str]:
-    lookup: Dict[str, str] = {}
-    for canonical, variants in synonyms.items():
-        canonical_lower = canonical.lower()
-        lookup[canonical_lower] = canonical_lower
-        for variant in variants:
-            lookup[variant.lower()] = canonical_lower
-    return lookup
+    normalized: Dict[str, List[str]] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str):
+            continue
+        canon = key.strip().lower()
+        if not canon:
+            continue
+        if isinstance(value, list):
+            variants = [v.strip() for v in value if isinstance(v, str) and v.strip()]
+        else:
+            variants = []
+        normalized[canon] = variants
+    return normalized
 
 
 def normalize_token(token: str, morph: pymorphy2.MorphAnalyzer) -> str:
@@ -57,16 +61,33 @@ def normalize_token(token: str, morph: pymorphy2.MorphAnalyzer) -> str:
     return token
 
 
-def apply_synonym(
-    token: str, original: str, lookup: Dict[str, str]
-) -> Tuple[str, str | None]:
-    normalized_token = token.lower()
-    original_token = original.lower()
+def collect_synonym_expansions(
+    text_lower: str, synonyms: Dict[str, List[str]]
+) -> Tuple[List[str], List[str]]:
+    expansions: List[str] = []
+    applied: List[str] = []
+    seen: set[str] = set()
 
-    replacement = lookup.get(normalized_token) or lookup.get(original_token)
-    if replacement and replacement != normalized_token:
-        return replacement, f"{token}→{replacement}"
-    return normalized_token if replacement else token, None
+    for canonical, variants in synonyms.items():
+        if not canonical:
+            continue
+        if canonical not in text_lower:
+            continue
+        if canonical not in seen:
+            expansions.append(canonical)
+            applied.append(f"{canonical}→{canonical}")
+            seen.add(canonical)
+        for variant in variants:
+            variant_clean = variant.strip()
+            if not variant_clean:
+                continue
+            variant_lower = variant_clean.lower()
+            if variant_lower in seen:
+                continue
+            expansions.append(variant_clean)
+            applied.append(f"{canonical}→{variant_clean}")
+            seen.add(variant_lower)
+    return expansions, applied
 
 
 def get_embedding(text: str) -> List[float]:
@@ -201,6 +222,7 @@ def build_response(
     original_text: str,
     apply_synonyms: bool,
     synonyms_version: str,
+    synonym_expansions: List[str] | None = None,
 ) -> Dict[str, object]:
     normalized_unique: List[str] = []
     seen = set()
@@ -209,8 +231,17 @@ def build_response(
             normalized_unique.append(token)
             seen.add(token)
 
-    normalized_text = " ^ ".join(normalized_unique)
-    embedding_input = normalized_text or " ".join(tokens)
+    expansions = [exp for exp in (synonym_expansions or []) if exp]
+    display_parts = normalized_unique.copy()
+    if expansions:
+        display_parts.extend(expansions)
+    normalized_text = " ^ ".join(display_parts)
+
+    embedding_tokens = normalized_unique.copy()
+    embedding_tokens.extend(expansions)
+    if not embedding_tokens:
+        embedding_tokens = tokens
+    embedding_input = " ".join(embedding_tokens).strip()
     cache_key = _make_cache_key(
         original=original_text,
         normalized=embedding_input,
@@ -227,6 +258,7 @@ def build_response(
             "normalized": normalized_text,
             "embedding": embedding,
             "synonyms_applied": synonyms_applied,
+            "synonym_expansions": expansions,
         }
         _cache_store(cache_key, response, original_text=original_text)
 
@@ -243,7 +275,6 @@ def build_response(
 
 def create_app() -> FastAPI:
     synonyms = load_synonyms(SYNS_FILE)
-    synonym_lookup = build_synonym_lookup(synonyms)
     synonyms_version = _synonyms_version_hash(synonyms)
     morph = pymorphy2.MorphAnalyzer()
     stemmer = RussianStemmer()
@@ -255,59 +286,18 @@ def create_app() -> FastAPI:
         if not text:
             raise HTTPException(status_code=400, detail="Text must not be empty.")
 
-        raw_tokens = TOKEN_RE.findall(text.lower())
+        text_lower = text.lower()
+        raw_tokens = TOKEN_RE.findall(text_lower)
+        synonym_expansions: List[str] = []
+        synonym_pairs: List[str] = []
+        if req.apply_synonyms and raw_tokens:
+            synonym_expansions, synonym_pairs = collect_synonym_expansions(
+                text_lower, synonyms
+            )
 
         if not req.normalize:
-            augmented_tokens: List[str] = []
-            synonym_pairs: List[Dict[str, str]] = []
-            synonym_expansions: List[str] = []
-
-            if req.apply_synonyms and raw_tokens:
-                seen_aug: set[str] = set()
-                for raw in raw_tokens:
-                    normalized = normalize_token(raw, morph)
-                    normalized_lower = normalized.lower()
-                    original_lower = raw.lower()
-
-                    canonical = (
-                        synonym_lookup.get(normalized_lower)
-                        or synonym_lookup.get(original_lower)
-                    )
-                    if canonical:
-                        variants = synonyms.get(canonical, [])
-                    else:
-                        variants = []
-
-                    if canonical and canonical not in seen_aug and canonical != original_lower:
-                        augmented_tokens.append(canonical)
-                        synonym_expansions.append(canonical)
-                        synonym_pairs.append(
-                            {"source": raw, "variant": canonical, "type": "canonical"}
-                        )
-                        seen_aug.add(canonical)
-
-                    for variant in variants:
-                        variant_clean = variant.strip()
-                        if not variant_clean:
-                            continue
-                        variant_lower = variant_clean.lower()
-                        if variant_lower in {original_lower, canonical}:
-                            continue
-                        if variant_lower in seen_aug:
-                            continue
-                        augmented_tokens.append(variant_clean)
-                        synonym_expansions.append(variant_clean)
-                        synonym_pairs.append(
-                            {
-                                "source": raw,
-                                "variant": variant_clean,
-                                "type": "synonym",
-                            }
-                        )
-                        seen_aug.add(variant_lower)
-
-            if augmented_tokens:
-                embedding_input = text + " " + " ".join(augmented_tokens)
+            if synonym_expansions:
+                embedding_input = text + " " + " ".join(synonym_expansions)
             else:
                 embedding_input = text
 
@@ -328,7 +318,7 @@ def create_app() -> FastAPI:
                     "embedding": embedding,
                     "synonyms_applied": synonym_pairs,
                     "synonym_expansions": synonym_expansions,
-                    "embedding_augmented": augmented_tokens,
+                    "embedding_augmented": synonym_expansions,
                 }
                 _cache_store(cache_key, response, original_text=text)
             if req.debug:
@@ -341,27 +331,22 @@ def create_app() -> FastAPI:
             return response
         stems: List[str] = []
         normalized_tokens: List[str] = []
-        synonyms_applied: List[str] = []
 
         for raw in raw_tokens:
             normalized = normalize_token(raw, morph)
-            normalized_with_synonym, replacement = apply_synonym(
-                normalized, raw, synonym_lookup
-            )
-            normalized_tokens.append(normalized_with_synonym)
-            if replacement:
-                synonyms_applied.append(replacement)
+            normalized_tokens.append(normalized)
             stems.append(stemmer.stem(raw))
 
         return build_response(
             tokens=raw_tokens,
             normalized_tokens=normalized_tokens,
             stems=stems,
-            synonyms_applied=synonyms_applied,
+            synonyms_applied=synonym_pairs,
             debug_requested=req.debug,
             original_text=text,
             apply_synonyms=req.apply_synonyms,
             synonyms_version=synonyms_version,
+            synonym_expansions=synonym_expansions,
         )
 
     return app_instance
