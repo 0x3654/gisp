@@ -220,10 +220,6 @@ def main() -> int:
         args.shard_index,
         args.ids,
     )
-    sys.stderr.write(
-        f"Выборка записей: force={args.force}, source_files={args.source_files}, limit={args.limit}, ids={args.ids}.\n"
-    )
-
     total_selected = 0
     total_processed = 0
     total_errors = 0
@@ -273,9 +269,9 @@ def main() -> int:
                         conn.commit()
 
                     elapsed = time.time() - batch_start
+                    error_suffix = f" (ошибок: {total_errors})" if total_errors else ""
                     sys.stderr.write(
-                        f"Обработано {total_processed} / отобрано {total_selected} записей "
-                        f"(ошибок: {total_errors}). Время обработки партии: {elapsed:.1f} с.\n"
+                        f"Обработано {total_processed} Время обработки: {elapsed:.1f} с.{error_suffix}\n"
                     )
                     batch_start = time.time()
 

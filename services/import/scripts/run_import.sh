@@ -12,8 +12,9 @@ fi
 
 : "${FILES_DIR:=/files}"
 : "${LOG_DIR:=/var/log/registry}"
-: "${MAX_LOG_FILES:=2}"
-: "${MAX_CSV_FILES:=2}"
+: "${MAX_LOG_FILES:=7}"
+: "${MAX_MAINTENANCE_LOG_FILES:=7}"
+: "${MAX_CSV_FILES:=7}"
 : "${AUTO_EMBED:=1}"
 
 while [[ $# -gt 0 ]]; do
@@ -90,10 +91,20 @@ fi
   fi
 
   if [[ $status -eq 0 ]]; then
-    echo -e "\n🔥 Удаляем старые файлы логов:"
+    echo -e "\n🔥 Удаляем старые файлы логов"
     old_logs=$(ls -1t "$LOG_DIR"/*.md 2>/dev/null | tail -n +$((MAX_LOG_FILES+1)))
     if [[ -n "$old_logs" ]]; then
       for f in $old_logs; do
+        log_date=$(echo "$f" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 | awk -F- '{print $3"."$2"."$1}')
+        echo "$log_date  $f"
+        rm -f "$f"
+      done
+    fi
+
+    maintenance_logs=$(ls -1t "$LOG_DIR"/maintenance_*.log 2>/dev/null | tail -n +$((MAX_MAINTENANCE_LOG_FILES+1)))
+    if [[ -n "$maintenance_logs" ]]; then
+      echo -e "\n🔥 Удаляем старые maintenance-логи"
+      for f in $maintenance_logs; do
         log_date=$(echo "$f" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 | awk -F- '{print $3"."$2"."$1}')
         echo "$log_date  $f"
         rm -f "$f"
