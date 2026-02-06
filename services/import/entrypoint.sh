@@ -1,9 +1,6 @@
 #!/bin/bash
 set -e
 
-# Export environment variables for cron
-printenv | grep -v 'no_proxy' > /etc/environment
-
 # Trap signals for graceful shutdown
 trap 'echo "Received signal, shutting down..."; kill $(jobs -p); exit 0' SIGTERM SIGINT
 
