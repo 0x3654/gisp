@@ -54,8 +54,7 @@ RUN apk add --no-cache \
     && addgroup -g 10001 appuser && adduser -D -u 10001 -G appuser appuser
 
 # Copy compiled Python packages and binaries from builder
-COPY --from=builder /install /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /install /usr/local
 
 # Copy application (with ownership)
 COPY --chown=appuser:appuser . /app/
