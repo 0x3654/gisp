@@ -528,6 +528,7 @@ class Pipe:
         debug_mode: bool,
         full_debug: bool = False,
         summary_debug: bool = False,
+        response_format: str = "markdown",
     ) -> str:
         rows, meta, semantic_info, error, payload = self._call_semantic_reestr(
             text, max_rows, None, debug_mode
@@ -544,7 +545,12 @@ class Pipe:
         rows_for_table = rows
         if not (debug_mode or summary_debug or full_debug):
             rows_for_table = self._strip_semantic_debug_fields(rows)
-        table_text = self._format_table(rows_for_table, meta, max_rows)
+
+        # Выбираем форматировщик в зависимости от запрошенного формата
+        if response_format == "json":
+            table_text = self._format_json(rows_for_table, meta, max_rows)
+        else:
+            table_text = self._format_table(rows_for_table, meta, max_rows)
         summary_lines: List[str] = []
         if summary_debug or full_debug:
             original_query = semantic_info.get("original_query") or query_text
@@ -582,11 +588,37 @@ class Pipe:
 
         result = table_text
         if summary_debug and summary_lines:
-            summary_block = "Отладка (кратко):\n- " + "\n- ".join(summary_lines)
-            result = summary_block + "\n\n" + table_text
+            # Для JSON формата добавляем debug информацию в JSON объект
+            if response_format == "json":
+                try:
+                    result_json = json.loads(table_text)
+                    result_json["debug"] = {
+                        "summary": summary_lines,
+                    }
+                    result = json.dumps(result_json, ensure_ascii=False, indent=2)
+                except Exception:
+                    # Если не удалось распарсить JSON, используем текстовый формат
+                    summary_block = "Отладка (кратко):\n- " + "\n- ".join(summary_lines)
+                    result = summary_block + "\n\n" + table_text
+            else:
+                summary_block = "Отладка (кратко):\n- " + "\n- ".join(summary_lines)
+                result = summary_block + "\n\n" + table_text
         elif full_debug and summary_lines:
-            summary_block = "Отладка (семантика):\n- " + "\n- ".join(summary_lines)
-            result = summary_block + "\n\n" + table_text
+            # Для JSON формата добавляем debug информацию в JSON объект
+            if response_format == "json":
+                try:
+                    result_json = json.loads(table_text)
+                    result_json["debug"] = {
+                        "summary": summary_lines,
+                    }
+                    result = json.dumps(result_json, ensure_ascii=False, indent=2)
+                except Exception:
+                    # Если не удалось распарсить JSON, используем текстовый формат
+                    summary_block = "Отладка (семантика):\n- " + "\n- ".join(summary_lines)
+                    result = summary_block + "\n\n" + table_text
+            else:
+                summary_block = "Отладка (семантика):\n- " + "\n- ".join(summary_lines)
+                result = summary_block + "\n\n" + table_text
 
         return result
 
@@ -1070,6 +1102,85 @@ class Pipe:
         summary = f"Результаты: {shown} Всего записей: {total}."
         return summary + "\n\n" + "\n".join([header] + lines)
 
+    def _format_json(
+        self, rows: List[Dict[str, Any]], meta: Dict[str, Any], max_rows: int
+    ) -> str:
+        """Форматирует результат в виде JSON для API запросов."""
+        if not rows:
+            return json.dumps({"results": [], "count": 0, "shown": 0}, ensure_ascii=False)
+
+        cols = self._pick_columns(rows)
+        rows_limited = rows[:max_rows]
+        total = meta.get("count")
+        if not isinstance(total, int) or total < 0:
+            total = len(rows)
+        shown = len(rows_limited)
+
+        # Словарь технических ключей на английском для интеграции (альернатива русским)
+        FIELD_RENAME_EN = {
+            "Наименование": "product_name",
+            "ТН ВЭД": "tnved",
+            "ОКПД2": "okpd2",
+            "Регномер": "reg_number",
+            "Срок действия": "valid_until",
+            "Регномер старый": "reg_number_old",
+            "Дата документа": "doc_date",
+            "Производитель": "manufacturer",
+            "ИНН": "inn",
+            "Семантическая дистанция": "distance",
+            "Совпавшие токены": "token_matches",
+        }
+
+        # Формируем результаты с техническими ключами на английском
+        results = []
+        for r in rows_limited:
+            row_data = {}
+            for c in cols:
+                val = r.get(c, "")
+                # Убираем лишнее экранирование кавычек (если есть)
+                if isinstance(val, str) and '\\"' in val:
+                    val = val.replace('\\"', '"')
+                # Форматируем даты в ISO формат для лучшей совместимости
+                if c in {"docdate", "docvalidtill"} and val:
+                    try:
+                        from datetime import datetime
+                        dt = None
+                        if isinstance(val, str):
+                            for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y"):
+                                try:
+                                    dt = datetime.strptime(val, fmt)
+                                    break
+                                except Exception:
+                                    continue
+                        elif isinstance(val, (int, float)):
+                            dt = datetime.fromtimestamp(val)
+                        if dt:
+                            # ISO формат YYYY-MM-DD для лучшей совместимости с 1С
+                            val = dt.strftime("%Y-%m-%d")
+                    except Exception:
+                        pass
+                # Форматируем distance как число
+                if c == "distance" and val not in ("", None):
+                    try:
+                        val = float(val)
+                    except Exception:
+                        pass
+                # Преобразуем None в пустую строку для лучшей совместимости
+                if val is None:
+                    val = ""
+
+                # Используем технические ключи на английском
+                display_name = FIELD_RENAME.get(c, c)
+                field_key = FIELD_RENAME_EN.get(display_name, display_name)
+                row_data[field_key] = val
+            results.append(row_data)
+
+        return json.dumps({
+            "results": results,
+            "count": total,
+            "shown": shown
+        }, ensure_ascii=False)
+
     def _strip_semantic_debug_fields(
         self, rows: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
@@ -1129,7 +1240,21 @@ class Pipe:
     #     # return parts
     #     pass
 
+    def _detect_response_format(self, body: dict) -> str:
+        """Определяет запрошенный формат ответа: json или markdown (по умолчанию)."""
+        response_format = body.get("response_format")
+        if isinstance(response_format, dict):
+            format_type = response_format.get("type", "")
+            if format_type == "json":
+                return "json"
+        elif isinstance(response_format, str) and response_format.lower() == "json":
+            return "json"
+        return "markdown"
+
     async def pipe(self, body: dict, __user__=None, __request__=None):
+        # Определяем формат ответа (JSON или markdown)
+        response_format_type = self._detect_response_format(body)
+
         # OpenWebUI может передать тело как JSON-строку или списки строк,
         # поэтому аккуратно нормализуем входные данные.
         if isinstance(body, str):
@@ -1275,6 +1400,7 @@ class Pipe:
                 debug_mode,
                 semantic_full_debug,
                 summary_debug=semantic_summary,
+                response_format=response_format_type,
             )
             if semantic_full_debug:
                 debug_details = self.semantic_remote(semantic_clean, debug=True)
@@ -1615,7 +1741,12 @@ class Pipe:
                 rows_for_table = combined_rows
                 if not (debug_flag or summary_flag or debug_full):
                     rows_for_table = self._strip_semantic_debug_fields(combined_rows)
-                table_text = self._format_table(rows_for_table, meta_combined, max_rows)
+
+                # Выбираем форматировщик в зависимости от запрошенного формата
+                if response_format_type == "json":
+                    table_text = self._format_json(rows_for_table, meta_combined, max_rows)
+                else:
+                    table_text = self._format_table(rows_for_table, meta_combined, max_rows)
                 result_text = table_text
                 if summary_flag:
                     summary_lines = summary_lines or []
@@ -1640,8 +1771,20 @@ class Pipe:
                             )
                         )
                     if summary_lines:
-                        summary_text = "Отладка (кратко):\n- " + "\n- ".join(summary_lines)
-                        result_text = summary_text + "\n\n" + result_text
+                        # Для JSON формата добавляем debug информацию в JSON объект
+                        if response_format_type == "json":
+                            try:
+                                result_json = json.loads(table_text)
+                                result_json["debug"] = {
+                                    "summary": summary_lines,
+                                }
+                                result_text = json.dumps(result_json, ensure_ascii=False, indent=2)
+                            except Exception:
+                                summary_text = "Отладка (кратко):\n- " + "\n- ".join(summary_lines)
+                                result_text = summary_text + "\n\n" + result_text
+                        else:
+                            summary_text = "Отладка (кратко):\n- " + "\n- ".join(summary_lines)
+                            result_text = summary_text + "\n\n" + result_text
                 return result_text
             else:
                 fallback_debug.append(
@@ -1750,14 +1893,31 @@ class Pipe:
         else:
             rows, meta = self._normalize_rows(data)
             if relaxed_outputs:
-                sections: List[str] = []
-                for entry in relaxed_outputs:
-                    msg = f"⚠️ Сняли фильтр {entry['filter']} — показаны возможные совпадения."
-                    table = self._format_table(entry["rows"], entry["meta"], max_rows)
-                    sections.append(f"{msg}\n\n{table}")
-                body_text = "\n\n".join(sections)
+                # Для JSON формата объединяем все результаты в один массив
+                if response_format_type == "json":
+                    all_results = []
+                    all_count = 0
+                    for entry in relaxed_outputs:
+                        entry_rows, entry_meta = self._normalize_rows({"rows": entry["rows"], "count": len(entry.get("rows", []))})
+                        all_results.extend(entry_rows)
+                        all_count = max(all_count, entry_meta.get("count", 0))
+                    if all_results:
+                        body_text = self._format_json(all_results, {"count": all_count}, max_rows)
+                    else:
+                        body_text = self._format_json(rows, meta, max_rows)
+                else:
+                    sections: List[str] = []
+                    for entry in relaxed_outputs:
+                        msg = f"⚠️ Сняли фильтр {entry['filter']} — показаны возможные совпадения."
+                        table = self._format_table(entry["rows"], entry["meta"], max_rows)
+                        sections.append(f"{msg}\n\n{table}")
+                    body_text = "\n\n".join(sections)
             else:
-                body_text = self._format_table(rows, meta, max_rows)
+                # Выбираем форматировщик в зависимости от запрошенного формата
+                if response_format_type == "json":
+                    body_text = self._format_json(rows, meta, max_rows)
+                else:
+                    body_text = self._format_table(rows, meta, max_rows)
 
         if summary_flag:
             summary_lines: List[str] = []
@@ -1782,17 +1942,57 @@ class Pipe:
             summary_lines.append(
                 "filters: " + json.dumps(filters_summary, ensure_ascii=False)
             )
-            summary_text = "Отладка (кратко):\n- " + "\n- ".join(summary_lines)
-            body_text = summary_text + "\n\n" + body_text
-        if semantic_error_msg:
-            error_header = f"⚠️ Семантический поиск не выполнен:\n{semantic_error_msg}"
-            body_text = error_header + ("\n\n" + body_text if body_text else "")
+
+            # Для JSON формата добавляем debug информацию в JSON объект
+            if response_format_type == "json":
+                try:
+                    result_json = json.loads(body_text)
+                    result_json["debug"] = {
+                        "summary": summary_lines,
+                        "filters": filters_summary,
+                    }
+                    if semantic_error_msg:
+                        result_json["debug"]["semantic_error"] = semantic_error_msg
+                    body_text = json.dumps(result_json, ensure_ascii=False, indent=2)
+                except Exception:
+                    # Если не удалось распарсить JSON, оставляем как есть
+                    summary_text = "Отладка (кратко):\n- " + "\n- ".join(summary_lines)
+                    body_text = summary_text + "\n\n" + body_text
+            else:
+                summary_text = "Отладка (кратко):\n- " + "\n- ".join(summary_lines)
+                body_text = summary_text + "\n\n" + body_text
+        elif semantic_error_msg:
+            if response_format_type == "json":
+                try:
+                    result_json = json.loads(body_text)
+                    result_json["debug"] = {"semantic_error": semantic_error_msg}
+                    body_text = json.dumps(result_json, ensure_ascii=False, indent=2)
+                except Exception:
+                    error_header = f"⚠️ Семантический поиск не выполнен:\n{semantic_error_msg}"
+                    body_text = error_header + ("\n\n" + body_text if body_text else "")
+            else:
+                error_header = f"⚠️ Семантический поиск не выполнен:\n{semantic_error_msg}"
+                body_text = error_header + ("\n\n" + body_text if body_text else "")
 
         if debug_full and latest_payload:
-            return (
-                body_text
-                + "\n\n```json\n"
-                + json.dumps(latest_payload, ensure_ascii=False, indent=2)
-                + "\n```"
-            )
+            if response_format_type == "json":
+                try:
+                    result_json = json.loads(body_text)
+                    result_json["debug"] = result_json.get("debug") or {}
+                    result_json["debug"]["payload"] = latest_payload
+                    body_text = json.dumps(result_json, ensure_ascii=False, indent=2)
+                except Exception:
+                    return (
+                        body_text
+                        + "\n\n```json\n"
+                        + json.dumps(latest_payload, ensure_ascii=False, indent=2)
+                        + "\n```"
+                    )
+            else:
+                return (
+                    body_text
+                    + "\n\n```json\n"
+                    + json.dumps(latest_payload, ensure_ascii=False, indent=2)
+                    + "\n```"
+                )
         return body_text

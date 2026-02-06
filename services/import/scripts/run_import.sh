@@ -49,13 +49,33 @@ export AUTO_EMBED
 mkdir -p "$LOG_DIR" "$FILES_DIR"
 LOG_FILE="$LOG_DIR/run_$(date '+%F_%H-%M').md"
 # ------------------------------------------
+extract_summary() {
+  local log_file="$1"
+
+  # Проверяем особые случаи
+  if grep -q "⚠️  Не удалось скачать новые CSV\." "$log_file"; then
+    grep -E "⚠️  Не удалось скачать новые CSV\.|✅ Файл уже загружен в базу|ℹ️  Новых дат для скачивания нет|CSV-файлы в каталоге.*не найдены" "$log_file" | head -5
+    return
+  fi
+
+  # Проверяем случай, когда CSV-файлы не найдены
+  if grep -q "CSV-файлы в каталоге.*не найдены" "$log_file"; then
+    grep -E "CSV-файлы в каталоге.*не найдены|ℹ️  Новых дат для скачивания нет" "$log_file" | head -3
+    return
+  fi
+
+  # Если был импорт - извлекаем статистику
+  grep -E "^\([0-9]{2}\.[0-9]{2}\.[0-9]{4}\) 📦 Последний файл:|🔄 Синхронизация:|Эмбеддинги (обновлены|:)|⏱ Прошедшее время:|✅ Импорт завершён:" "$log_file" | head -10
+}
+
 send_telegram() {
   local message="$1"
   if [[ -n "${BOT_TOKEN:-}" && -n "${CHAT_ID:-}" ]]; then
+    local log_path=$(realpath "$LOG_FILE")
     curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
       -F chat_id="${CHAT_ID}" \
       -F caption="${message}" \
-      -F document=@"$LOG_FILE" > /dev/null || echo "[WARN] Не удалось отправить файл в Telegram" >> "$LOG_FILE"
+      -F document=@"$log_path" > /dev/null || echo "[WARN] Не удалось отправить файл в Telegram" >> "$LOG_FILE"
   else
     echo "[WARN] Переменные Telegram не заданы" >> "$LOG_FILE"
   fi
@@ -136,20 +156,29 @@ if [[ $status -ne 0 ]]; then
   send_telegram "❌ Ошибка импорта (код $status):
 $(date '+%d.%m.%Y %H:%M:%S')"
 else
-  # даже если формально успешный код, проверяем наличие ошибок в логе
+  # Формируем информативное сообщение на основе статистики из лога
   RAW_HOST=$(hostname -f 2>/dev/null || hostname)
   if [[ "$RAW_HOST" =~ ^[0-9a-f]{12}$ ]]; then
     RAW_HOST="registry-node-${RAW_HOST:0:6}"
   fi
   HOST_ID="${REGISTRY_NODE_NAME:-$RAW_HOST}"
+  TIMESTAMP=$(date '+%d.%m.%Y %H:%M:%S')
 
   if grep -qiE "(psql: error|Traceback|Exception)" "$LOG_FILE"; then
     echo "[WARN] Обнаружены сообщения об ошибках в логе" >> "$LOG_FILE"
     send_telegram "⚠️ Ошибка импорта POSTGRES:
-$(date '+%d.%m.%Y %H:%M:%S') (${HOST_ID})"
+${TIMESTAMP} (${HOST_ID})"
   else
-    send_telegram "✅ Импорт завершён успешно:
-$(date '+%d.%m.%Y %H:%M:%S') (${HOST_ID})"
+    # Извлекаем статистику из лога
+    SUMMARY=$(extract_summary "$LOG_FILE")
+    if [[ -n "$SUMMARY" ]]; then
+      send_telegram "${SUMMARY}
+
+${TIMESTAMP} (${HOST_ID})"
+    else
+      send_telegram "✅ Импорт завершён успешно:
+${TIMESTAMP} (${HOST_ID})"
+    fi
   fi
 fi
 

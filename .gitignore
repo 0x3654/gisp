@@ -21,3 +21,4 @@ workflow.excalidraw
 *.bak
 *.todo
 *__pycache__
+promt.md
