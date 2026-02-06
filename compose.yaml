@@ -3,16 +3,16 @@ services:
   postgres_registry:
     image: pgvector/pgvector:pg16
     container_name: gisp_pg
-    shm_size: "2g"
+    shm_size: ${PG_SHM_SIZE:-2g}
     env_file: .env
     command: >
       postgres
       -c shared_preload_libraries=pg_prewarm
       -c pg_prewarm.autoprewarm=on
-      -c pg_prewarm.autoprewarm_interval=${PG_AUTOPREWARM_INTERVAL:-300}
+      -c pg_prewarm.autoprewarm_interval=${PG_AUTOPREWARM_INTERVAL:-120}
       -c pg_prewarm.autoprewarm_startup=on
     ports:
-      - '5432:5432'
+      - '${POSTGRES_PORT:-5432}:5432'
     volumes:
       - ./services/postgres/data:/var/lib/postgresql/data
       - ./services/init:/docker-entrypoint-initdb.d:ro
@@ -29,13 +29,14 @@ services:
        - internal
        - default
   api:
-    build:
-      context: ./services/api
-      dockerfile: Dockerfile
+    image: docker.io/0x3654/gisp-api:latest
     container_name: gisp_api
     env_file: .env
+    environment:
+      - TZ=${TZ:-Europe/Moscow}
+      - API_PORT=${API_PORT:-8000}
     ports:
-      - '8000:8000'
+      - '${API_PORT:-8000}:8000'
     depends_on:
       postgres_registry:
         condition: service_healthy
@@ -45,9 +46,10 @@ services:
         - python
         - -c
         - |
-          import urllib.request, sys
+          import urllib.request, sys, os
           try:
-              urllib.request.urlopen("http://127.0.0.1:8000/docs", timeout=5)
+              port = os.getenv('API_PORT', '8000')
+              urllib.request.urlopen(f"http://127.0.0.1:{port}/docs", timeout=5)
           except Exception:
               sys.exit(1)
       interval: 30s
@@ -60,11 +62,16 @@ services:
     networks:
         - internal
   import:
-    build:
-      context: ./services/import
-      dockerfile: Dockerfile
+    image: docker.io/0x3654/gisp-import:latest
     container_name: gisp_import
     env_file: .env
+    environment:
+      - TZ=${TZ:-Europe/Moscow}  # Container timezone (cron uses this for schedule)
+      - POSTGRES_HOST=postgres_registry
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      # Cron schedule format: minute hour day month dow (uses $TZ above)
+      - CRON_IMPORT_SCHEDULE=${CRON_IMPORT_SCHEDULE:-5 0 * * *}  # Daily at 00:05 Moscow time
+      - CRON_MAINTENANCE_SCHEDULE=${CRON_MAINTENANCE_SCHEDULE:-0 5 * * *}  # Daily at 05:00 Moscow time
     volumes:
       - ./logs:/var/log/registry
       - ./services/import:/import
@@ -77,7 +84,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - pg_isready -h postgres_registry -U postgres && pidof cron >/dev/null
+        - pg_isready -h postgres_registry -U postgres && pidof crond >/dev/null
       interval: 60s
       timeout: 10s
       retries: 3
@@ -92,7 +99,7 @@ services:
     image: ghcr.io/open-webui/open-webui
     container_name: gisp_openwebui
     ports:
-      - '3333:8080'
+      - '${OPENWEBUI_PORT:-3333}:8080'
     volumes:
       - ./services/openwebui/data:/app/backend/data
     healthcheck:
@@ -125,9 +132,7 @@ services:
     working_dir: /opt
     entrypoint:
       - python
-      - /opt/sync_openwebui_function.py
-      - --script
-      - /opt/reestr_openwebui.py
+      - /opt/reestr_sync.py
       - --db
       - /data/webui.db
       - --function-id
@@ -141,6 +146,8 @@ services:
     env_file: .env
     environment:
       - PYTHONPATH=/app
+      - TZ=${TZ:-Europe/Moscow}
+      - SEMANTIC_PORT=${SEMANTIC_PORT:-8010}
     volumes:
       - ./services/semantic/synonyms.json:/app/synonyms.json:ro
     command:
@@ -149,19 +156,20 @@ services:
       - --host
       - 0.0.0.0
       - --port
-      - "8010"
+      - "${SEMANTIC_PORT:-8010}"
       - --workers
-      - "2"
+      - "${SEMANTIC_WORKERS:-2}"
     healthcheck:
       test:
         - CMD-SHELL
         - python
         - -c
         - |
-          import socket, sys
+          import socket, sys, os
           try:
+              port = int(os.getenv('SEMANTIC_PORT', '8010'))
               s = socket.socket()
-              s.connect(("127.0.0.1", 8010))
+              s.connect(("127.0.0.1", port))
               s.close()
           except Exception:
               sys.exit(1)
@@ -178,9 +186,7 @@ services:
     networks:
       - internal
   embeddings-worker:
-    build:
-      context: .
-      dockerfile: ./services/import/Dockerfile.embeddings
+    image: docker.io/0x3654/gisp-semantic:latest
     profiles:
       - embeddings
     env_file: .env
@@ -219,7 +225,13 @@ services:
       - starter
     env_file: .env
     environment:
+      - SNAPSHOT_PATH=/app/registry_start_snapshot.sql.gz
+      - STARTER_MAX_WAIT=180
       - FORCE=${STARTER_FORCE:-0}
+      - POSTGRES_HOST=postgres_registry
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=registry
+      - POSTGRES_USER=registry
     depends_on:
       - postgres_registry
     restart: "no"

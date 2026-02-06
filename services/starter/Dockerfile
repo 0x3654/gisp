@@ -1,25 +1,35 @@
-FROM python:3.11-slim
+FROM alpine:3.21
 
+# Build arguments
+ARG VERSION=1.0
+
+# Metadata labels
+LABEL maintainer="gisp-team"
+LABEL service="starter"
+LABEL version=$VERSION
+LABEL org.opencontainers.image.source="https://github.com/0x3654/gisp"
+
+# Set working directory
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install runtime dependencies only (bash + postgresql-client)
+RUN apk add --no-cache \
+    bash \
     postgresql-client \
     ca-certificates \
-    curl \
- && rm -rf /var/lib/apt/lists/*
+    && addgroup -g 10001 appuser \
+    && adduser -D -u 10001 -G appuser -h /app -s /bin/bash appuser
 
-COPY services/starter/build/registry_start_snapshot.sql.gz /app/registry_start_snapshot.sql.gz
-COPY services/starter/restore_snapshot.sh /app/restore_snapshot.sh
-COPY services/starter/entrypoint.sh /entrypoint.sh
+# Copy entrypoint script (includes restore logic - combined into single file)
+COPY --chown=appuser:appuser services/starter/entrypoint.sh /entrypoint.sh
 
-RUN chmod +x /entrypoint.sh /app/restore_snapshot.sh
+# Copy snapshot (readable by all)
+COPY services/starter/build/registry_start_snapshot.sql.gz /app/
 
-ENV SNAPSHOT_PATH=/app/registry_start_snapshot.sql.gz \
-    STARTER_MAX_WAIT=180 \
-    FORCE=0 \
-    POSTGRES_HOST=postgres_registry \
-    POSTGRES_PORT=5432 \
-    POSTGRES_DB=registry \
-    POSTGRES_USER=registry
+# Make entrypoint executable
+RUN chmod +x /entrypoint.sh
+
+# Run as non-root user
+USER appuser
 
 ENTRYPOINT ["/entrypoint.sh"]

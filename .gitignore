@@ -5,6 +5,7 @@ dumps/
 _query/
 files/*
 logs/*
+.ansible
 
 # environments
 *.env
@@ -22,3 +23,5 @@ workflow.excalidraw
 *.todo
 *__pycache__
 promt.md
+
+DOCKER_OPTIMIZATION_PLAN.md

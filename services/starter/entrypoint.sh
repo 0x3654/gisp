@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+# Environment variables with defaults
 : "${POSTGRES_HOST:=postgres_registry}"
 : "${POSTGRES_PORT:=5432}"
 : "${POSTGRES_DB:=registry}"
@@ -31,6 +32,40 @@ existing_rows() {
     "SELECT count(*) FROM registry.reestr" 2>/dev/null || echo "0"
 }
 
+restore_snapshot() {
+  local SNAPSHOT_FILE="${1:-/app/registry_start_snapshot.sql.gz}"
+
+  psql_exec() {
+    PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
+      -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"
+  }
+
+  echo "🧹 Ensuring schema exists and dropping staging tables..."
+  psql_exec <<'SQL'
+CREATE SCHEMA IF NOT EXISTS registry;
+CREATE EXTENSION IF NOT EXISTS vector SCHEMA registry;
+DROP TABLE IF EXISTS registry.semantic_items CASCADE;
+DROP TABLE IF EXISTS registry.load_log CASCADE;
+DROP TABLE IF EXISTS registry.reestr CASCADE;
+SQL
+
+  echo "📦 Importing snapshot..."
+  if [[ "$SNAPSHOT_FILE" == *.gz ]]; then
+    gunzip -c "$SNAPSHOT_FILE" | sed '/^\\restrict/d' \
+      | PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
+          -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+  else
+    cat "$SNAPSHOT_FILE" | sed '/^\\restrict/d' \
+      | PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
+          -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+  fi
+
+  echo "📈 Syncing sequences..."
+  psql_exec -c "SELECT setval('registry.reestr_id_seq', (SELECT max(id) FROM registry.reestr));"
+  psql_exec -c "SELECT setval('registry.load_log_id_seq', (SELECT max(id) FROM registry.load_log));"
+}
+
+# Main execution
 wait_for_pg
 
 ROWS="$(existing_rows)"
@@ -49,5 +84,5 @@ if [[ ! -f "$SNAPSHOT_PATH" ]]; then
 fi
 
 echo "⬇️  Restoring snapshot from $SNAPSHOT_PATH ..."
-/app/restore_snapshot.sh "$SNAPSHOT_PATH"
+restore_snapshot "$SNAPSHOT_PATH"
 echo "✅ Done."

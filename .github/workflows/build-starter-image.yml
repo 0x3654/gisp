@@ -11,12 +11,15 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      snapshot_date: ${{ steps.extract_date.outputs.date }}
 
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
 
       - name: Download snapshot asset
+        id: extract_date
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -30,6 +33,10 @@ jobs:
             exit 1
           fi
           mv "$SNAPSHOT" services/starter/build/registry_start_snapshot.sql.gz
+          # Extract date from snapshot filename (format: registry_start_snapshot-YYYYMMDD.sql.gz)
+          SNAPSHOT_DATE=$(gunzip -c services/starter/build/registry_start_snapshot.sql.gz | grep "^-- Dumped from" | head -1 | sed -E 's/.*([0-9]{4}-[0-9]{2}-[0-9]{2}).*/\1/' || date +%Y-%m-%d)
+          echo "date=$SNAPSHOT_DATE" >> $GITHUB_OUTPUT
+          echo "Snapshot date: $SNAPSHOT_DATE"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -50,3 +57,4 @@ jobs:
           tags: |
             docker.io/${{ secrets.DOCKERHUB_USERNAME }}/gisp-starter:latest
             docker.io/${{ secrets.DOCKERHUB_USERNAME }}/gisp-starter:${{ github.event.release.tag_name }}
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/gisp-starter:${{ steps.extract_date.outputs.date }}

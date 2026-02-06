@@ -1,14 +1,14 @@
-name: build-semantic-image
+name: build-import-image
 
 on:
   push:
     branches:
       - master
     paths:
-      - "services/semantic/semantic_service.py"
-      - "services/semantic/model_loader.py"
-      - "services/semantic/Dockerfile"
-      - ".github/workflows/build-semantic-image.yml"
+      - "services/import/scripts/**"
+      - "services/import/Dockerfile"
+      - "services/import/entrypoint.sh"
+      - ".github/workflows/build-import-image.yml"
   workflow_dispatch:
 
 jobs:
@@ -19,8 +19,8 @@ jobs:
       packages: write
 
     env:
-      HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      IMAGE_NAME: gisp-semantic
+      IMAGE_NAME: gisp-import
+
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -34,13 +34,11 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push semantic image (multi-arch)
+      - name: Build and push import image (multi-arch)
         uses: docker/build-push-action@v5
         with:
-          context: ./services/semantic
+          context: ./services/import
           push: true
-          build-args: |
-            HF_TOKEN=${{ env.HF_TOKEN }}
           platforms: linux/amd64,linux/arm64
           tags: |
             docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest

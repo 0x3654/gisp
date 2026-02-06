@@ -1,29 +1,85 @@
-FROM python:3.12-slim
+# ===================================
+# BUILDER STAGE - Compile dependencies
+# ===================================
+FROM python:3.12-alpine AS builder
+
+# Build arguments
+ARG VERSION=1.0
+
+# Install build dependencies for psycopg2 compilation
+RUN apk add --no-cache \
+    gcc \
+    musl-dev \
+    postgresql-dev
+
+# Install Python packages to /install directory
+# These will be copied to final stage, build tools stay behind
+RUN pip install --no-cache-dir --target=/install \
+    psycopg2==2.9.9 \
+    requests==2.32.3
+
+# ===================================
+# FINAL STAGE - Runtime only
+# ===================================
+FROM python:3.12-alpine
+
+# Build arguments
+ARG VERSION=1.0
+
+# Metadata labels
+LABEL maintainer="gisp-team"
+LABEL service="import"
+LABEL version=$VERSION
+LABEL org.opencontainers.image.source="https://github.com/0x3654/gisp"
+
+# Environment variables
+ENV TZ=UTC \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    CRON_IMPORT_SCHEDULE="5 0 * * *" \
+    CRON_MAINTENANCE_SCHEDULE="0 5 * * *"
+
+# Set working directory
 WORKDIR /app
 
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install ONLY runtime dependencies (no gcc, no build tools!)
+RUN apk add --no-cache \
     postgresql-client \
     bash \
-    cron \
     curl \
-    procps \
-    && rm -rf /var/lib/apt/lists/*
+    && ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime \
+    && echo ${TZ} > /etc/timezone \
+    && addgroup -g 10001 appuser && adduser -D -u 10001 -G appuser appuser
 
-COPY ./scripts /scripts
-RUN chmod +x /scripts/*
+# Copy compiled Python packages from builder
+COPY --from=builder /install /usr/local/lib/python3.12/site-packages
 
-RUN pip install --no-cache-dir psycopg2-binary requests
+# Copy scripts and entrypoint (with ownership)
+COPY --chown=appuser:appuser services/import/scripts /scripts
+COPY --chown=appuser:appuser services/import/entrypoint.sh /usr/local/bin/entrypoint.sh
 
-# Cron tasks
-RUN cat <<'EOF' > /etc/cron.d/registry-cron \
-    && chmod 0644 /etc/cron.d/registry-cron
-5 0 * * * root bash -l -c '/scripts/run_import.sh >> /var/log/cron.log 2>&1'
-0 5 * * * root bash -l -c '/scripts/run_pg_maintenance.sh >> /var/log/cron.log 2>&1'
+# Configure cron and set permissions
+RUN chmod +x /scripts/* /usr/local/bin/entrypoint.sh \
+    && mkdir -p /etc/cron.d \
+    && cat <<'EOF' > /etc/cron.d/registry-cron \
+    && chmod 0644 /etc/cron.d/registry-cron \
+    && touch /var/log/cron.log \
+    && chmod 0644 /var/log/cron.log \
+    && chown appuser:appuser /var/log/cron.log
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+${CRON_IMPORT_SCHEDULE:-5 0 * * *} appuser /scripts/run_import.sh >> /var/log/cron.log 2>&1
+${CRON_MAINTENANCE_SCHEDULE:-0 5 * * *} appuser /scripts/run_pg_maintenance.sh >> /var/log/cron.log 2>&1
 EOF
 
-RUN touch /var/log/cron.log
+# Healthcheck (will be overridden by compose.yaml, but useful for local runs)
+HEALTHCHECK --interval=60s --timeout=10s --start-period=60s --retries=3 \
+    CMD pg_isready -h postgres_registry -U postgres && pidof crond >/dev/null
 
-# Запуск cron и наблюдение за логами
-CMD bash -c "printenv | grep -v 'no_proxy' > /etc/environment && ( /scripts/run_import.sh & ) && service cron start && tail -f /var/log/cron.log"
+# Run as non-root user
+USER appuser
+
+# Use entrypoint for proper initialization and signal handling
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
