@@ -58,3 +58,11 @@ jobs:
             docker.io/${{ secrets.DOCKERHUB_USERNAME }}/gisp-starter:latest
             docker.io/${{ secrets.DOCKERHUB_USERNAME }}/gisp-starter:${{ github.event.release.tag_name }}
             docker.io/${{ secrets.DOCKERHUB_USERNAME }}/gisp-starter:${{ steps.extract_date.outputs.date }}
+
+      - name: Make repository public
+        run: |
+          curl -X PATCH \
+            -H "Authorization: Bearer ${{ secrets.DOCKERHUB_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"is_private": false}' \
+            https://hub.docker.com/v2/repositories/${{ secrets.DOCKERHUB_USERNAME }}/gisp-starter/ || true
