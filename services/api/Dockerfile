@@ -53,8 +53,11 @@ RUN apk add --no-cache \
     && echo ${TZ} > /etc/timezone \
     && addgroup -g 10001 appuser && adduser -D -u 10001 -G appuser appuser
 
-# Copy compiled Python packages and binaries from builder
-COPY --from=builder /install /usr/local
+# Copy compiled Python packages from builder
+COPY --from=builder /install /usr/local/lib/python3.12/site-packages
+
+# Copy uvicorn CLI (installed to /install/bin by pip install --target)
+COPY --from=builder /install/bin/uvicorn /usr/local/bin/uvicorn
 
 # Copy application (with ownership)
 COPY --chown=appuser:appuser . /app/
