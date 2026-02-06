@@ -57,8 +57,8 @@ RUN apk add --no-cache \
 COPY --from=builder /install /usr/local/lib/python3.12/site-packages
 
 # Copy scripts and entrypoint (with ownership)
-COPY --chown=appuser:appuser services/import/scripts /scripts
-COPY --chown=appuser:appuser services/import/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --chown=appuser:appuser scripts /scripts
+COPY --chown=appuser:appuser entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Configure cron and set permissions
 RUN chmod +x /scripts/* /usr/local/bin/entrypoint.sh \
