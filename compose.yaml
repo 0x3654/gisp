@@ -1,7 +1,7 @@
 name: registry
 services:
   postgres_registry:
-    image: pgvector/pgvector:pg16
+    image: docker.io/pgvector/pgvector:pg16
     container_name: gisp_pg
     shm_size: ${PG_SHM_SIZE:-2g}
     env_file: .env
@@ -123,7 +123,7 @@ services:
       - internal
       - default
   openwebui-sync:
-    image: python:3.12-slim
+    image: docker.io/python:3.12-slim
     container_name: gisp_openwebui-sync
     profiles: ["tools"]
     volumes:
