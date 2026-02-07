@@ -85,7 +85,7 @@ endpoint = os.environ.get("HF_ENDPOINT") or None
 
 snapshot_download(
     repo_id=repo_id,
-    
+
     local_dir=target,
     allow_patterns=[
         "README.md",

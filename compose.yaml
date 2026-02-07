@@ -57,8 +57,6 @@ services:
       retries: 3
       start_period: 40s
     restart: unless-stopped
-    labels:
-      - "com.centurylinklabs.watchtower.enable=false"
     networks:
         - internal
   import:
@@ -84,14 +82,12 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - pg_isready -h postgres_registry -U postgres && pidof crond >/dev/null
+        - pg_isready -h postgres_registry -U ${POSTGRES_USER:-postgres} && pidof crond >/dev/null
       interval: 60s
       timeout: 10s
       retries: 3
       start_period: 60s
     restart: unless-stopped
-    labels:
-      - "com.centurylinklabs.watchtower.enable=false"
     networks:
       - internal
       - default
@@ -177,8 +173,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
-    labels:
-      - "com.centurylinklabs.watchtower.enable=false"
     depends_on:
       postgres_registry:
         condition: service_healthy
@@ -191,8 +185,6 @@ services:
       - embeddings
     env_file: .env
     working_dir: /app
-    labels:
-      - "com.centurylinklabs.watchtower.enable=false"
     volumes:
       - .:/app
     depends_on:
