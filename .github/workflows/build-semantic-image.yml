@@ -5,10 +5,10 @@ on:
     branches:
       - master
     paths:
-      - "services/semantic/semantic_service.py"
-      - "services/semantic/model_loader.py"
-      - "services/semantic/Dockerfile.onnx"
-      - "services/semantic/Dockerfile.pytorch"
+      - "src/semantic/semantic_service.py"
+      - "src/semantic/model_loader.py"
+      - "src/semantic/Dockerfile.onnx"
+      - "src/semantic/Dockerfile.pytorch"
       - ".github/workflows/build-semantic-image.yml"
   workflow_dispatch:
 
@@ -41,8 +41,8 @@ jobs:
       - name: Build and push ONNX images (amd64 + arm64)
         uses: docker/build-push-action@v5
         with:
-          context: ./services/semantic
-          file: ./services/semantic/Dockerfile.onnx
+          context: .
+          file: src/semantic/Dockerfile.onnx
           push: true
           build-args: |
             HF_TOKEN=${{ env.HF_TOKEN }}
@@ -57,8 +57,8 @@ jobs:
       - name: Build and push PyTorch images (amd64 + arm64)
         uses: docker/build-push-action@v5
         with:
-          context: ./services/semantic
-          file: ./services/semantic/Dockerfile.pytorch
+          context: .
+          file: src/semantic/Dockerfile.pytorch
           push: true
           build-args: |
             HF_TOKEN=${{ env.HF_TOKEN }}

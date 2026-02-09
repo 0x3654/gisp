@@ -78,7 +78,7 @@ services:
       - CRON_MAINTENANCE_SCHEDULE=${CRON_MAINTENANCE_SCHEDULE:-0 5 * * *}  # Daily at 05:00 Moscow time
     volumes:
       - ./logs:/var/log/registry
-      - ./services/import:/import
+      # Code is in image (moved to /src/import/)
       - ./files:/files:cached
     depends_on:
       postgres_registry:
@@ -154,6 +154,9 @@ services:
   # - ARM64 ONNX: ~1.69GB, 37-44ms (рекомендуется)
   # - ARM64 PyTorch: ~2.46GB, 104-186ms
   semantic:
+    build:
+      context: .
+      dockerfile: src/semantic/Dockerfile.onnx
     image: docker.io/0x3654/gisp-semantic-onnx:latest
     container_name: gisp_semantic_service
     env_file: .env
@@ -225,7 +228,7 @@ services:
       BATCH_SIZE: "200"
     command: >
       bash -lc "set -e;
-      ./services/import/scripts/run_embeddings_worker.sh"
+      ./src/import/scripts/run_embeddings_worker.sh"
     deploy:
       restart_policy:
         condition: none
