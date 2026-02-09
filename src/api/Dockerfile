@@ -15,9 +15,9 @@ RUN apk add --no-cache \
 # Install Python packages to /install directory
 # These will be copied to final stage, build tools stay behind
 RUN pip install --no-cache-dir --target=/install \
-    fastapi==0.115.0 \
-    uvicorn[standard]==0.32.0 \
-    psycopg2==2.9.9 \
+    fastapi==0.115.6 \
+    uvicorn[standard]==0.34.0 \
+    psycopg2==2.9.10 \
     aiofiles==24.1.0 \
     requests==2.32.3
 
@@ -59,8 +59,8 @@ COPY --from=builder /install /usr/local/lib/python3.12/site-packages
 # Copy uvicorn CLI (installed to /install/bin by pip install --target)
 COPY --from=builder /install/bin/uvicorn /usr/local/bin/uvicorn
 
-# Copy application (with ownership)
-COPY --chown=appuser:appuser . /app/
+# Copy application code (with ownership)
+COPY --chown=appuser:appuser ./src/api /app
 
 # Expose port
 EXPOSE 8000

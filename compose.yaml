@@ -29,6 +29,9 @@ services:
        - internal
        - default
   api:
+    build:
+      context: .
+      dockerfile: src/api/Dockerfile
     image: docker.io/0x3654/gisp-api:latest
     container_name: gisp_api
     env_file: .env
