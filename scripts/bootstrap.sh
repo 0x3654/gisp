@@ -63,6 +63,16 @@ copy_if_missing "services/semantic/synonyms.example.json" "services/semantic/syn
 mkdir -p services/openwebui/data
 copy_if_missing "services/openwebui/webui.db.example" "services/openwebui/data/webui.db"
 
+# Auto-select optimal semantic image based on host architecture
+ARCH=$(uname -m)
+info "Detected architecture: $ARCH"
+# ONNX is used by default in compose.yaml for both architectures
+if [[ "$ARCH" == "aarch64" ]]; then
+  info "Using ARM64 image with ONNX Runtime backend (optimized for Apple Silicon/ARM)"
+else
+  info "Using AMD64 image with ONNX Runtime backend (optimized for Intel/AMD)"
+fi
+
 info "Restoring starter dump via docker compose (profile starter)"
 sudo env COMPOSE_PROFILES=starter COMPOSE_INTERACTIVE_NO_CLI=1 docker compose run -T --rm starter-dump </dev/null
 

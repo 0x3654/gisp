@@ -1,6 +1,8 @@
 *.DS_Store
 dumps/
 
+.vscode
+
 .idea/
 _query/
 files/*

@@ -9,7 +9,7 @@ from typing import Dict, List, Tuple
 
 import psycopg2
 import psycopg2.extras
-import pymorphy2
+import pymorphy3
 from fastapi import FastAPI, HTTPException
 from nltk.stem.snowball import RussianStemmer
 from pydantic import BaseModel
@@ -52,7 +52,7 @@ def load_synonyms(path: Path) -> Dict[str, List[str]]:
     return normalized
 
 
-def normalize_token(token: str, morph: pymorphy2.MorphAnalyzer) -> str:
+def normalize_token(token: str, morph: pymorphy3.MorphAnalyzer) -> str:
     if token.isdigit():
         return token
     parsed = morph.parse(token)
@@ -276,7 +276,7 @@ def build_response(
 def create_app() -> FastAPI:
     synonyms = load_synonyms(SYNS_FILE)
     synonyms_version = _synonyms_version_hash(synonyms)
-    morph = pymorphy2.MorphAnalyzer()
+    morph = pymorphy3.MorphAnalyzer()
     stemmer = RussianStemmer()
     app_instance = FastAPI()
 
