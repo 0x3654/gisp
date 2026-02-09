@@ -61,7 +61,9 @@ fi
 cd "$TARGET_DIR"
 
 info "Preparing configuration files"
-copy_if_missing ".env.example" ".env"
+if [[ ! -f .env ]]; then
+  perl -pe 's/{{ .*? \| default\(.*?([0-9a-zA-Z:_\/.-]+).*?\) }}/\1/g' .env.example > .env
+fi
 copy_if_missing "services/semantic/synonyms.example.json" "services/semantic/synonyms.json"
 mkdir -p services/openwebui/data
 copy_if_missing "services/openwebui/webui.db.example" "services/openwebui/data/webui.db"
