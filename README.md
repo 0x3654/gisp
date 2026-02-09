@@ -102,7 +102,7 @@ curl -fsSL https://raw.githubusercontent.com/0x3654/gisp/master/bootstrap.sh | b
 
 compose.yaml             # Docker Compose конфигурация
 .env.example             # Шаблон конфигурации
-bootstrap.sh     # Скрипт быстрого деплоя
+bootstrap.sh             # Скрипт быстрого деплоя
 ```
 
 **Ключевые особенности:**
