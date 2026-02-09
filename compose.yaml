@@ -29,9 +29,6 @@ services:
        - internal
        - default
   api:
-    build:
-      context: .
-      dockerfile: src/api/Dockerfile
     image: docker.io/0x3654/gisp-api:latest
     container_name: gisp_api
     env_file: .env
@@ -63,9 +60,6 @@ services:
     networks:
         - internal
   import:
-    build:
-      context: .
-      dockerfile: src/import/Dockerfile
     image: docker.io/0x3654/gisp-import:latest
     container_name: gisp_import
     env_file: .env
@@ -125,9 +119,7 @@ services:
       - internal
       - default
   openwebui-sync:
-    build:
-      context: .
-      dockerfile: src/openwebui/Dockerfile
+    image: docker.io/0x3654/gisp-openwebui-sync:latest
     container_name: gisp_openwebui-sync
     profiles: ["tools"]
     volumes:
@@ -144,7 +136,6 @@ services:
     depends_on:
       - openwebui
     restart: "no"
-
   # Semantic service (sentence embeddings)
   # По умолчанию использует gisp-semantic-onnx (оптимально для обеих архитектур)
   # Для переключения на PyTorch замените image: на docker.io/0x3654/gisp-semantic-pytorch:latest
@@ -154,9 +145,6 @@ services:
   # - ARM64 ONNX: ~1.69GB, 37-44ms (рекомендуется)
   # - ARM64 PyTorch: ~2.46GB, 104-186ms
   semantic:
-    build:
-      context: .
-      dockerfile: src/semantic/Dockerfile.onnx
     image: docker.io/0x3654/gisp-semantic-onnx:latest
     container_name: gisp_semantic_service
     env_file: .env
