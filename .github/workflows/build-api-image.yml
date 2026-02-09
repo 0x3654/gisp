@@ -5,8 +5,7 @@ on:
     branches:
       - master
     paths:
-      - "services/api/main.py"
-      - "services/api/Dockerfile"
+      - "src/api/**"
       - ".github/workflows/build-api-image.yml"
   workflow_dispatch:
 
@@ -36,7 +35,8 @@ jobs:
       - name: Build and push API image (multi-arch)
         uses: docker/build-push-action@v5
         with:
-          context: ./services/api
+          context: .
+          file: src/api/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |

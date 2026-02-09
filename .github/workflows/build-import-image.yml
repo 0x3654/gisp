@@ -5,9 +5,7 @@ on:
     branches:
       - master
     paths:
-      - "services/import/scripts/**"
-      - "services/import/Dockerfile"
-      - "services/import/entrypoint.sh"
+      - "src/import/**"
       - ".github/workflows/build-import-image.yml"
   workflow_dispatch:
 
@@ -37,7 +35,8 @@ jobs:
       - name: Build and push import image (multi-arch)
         uses: docker/build-push-action@v5
         with:
-          context: ./services/import
+          context: .
+          file: src/import/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
