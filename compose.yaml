@@ -119,16 +119,18 @@ services:
       - internal
       - default
   openwebui-sync:
-    image: docker.io/python:3.12-slim
+    build:
+      context: .
+      dockerfile: src/openwebui/Dockerfile
     container_name: gisp_openwebui-sync
     profiles: ["tools"]
     volumes:
-      - ./services/openwebui/tools:/opt/:ro
+      # Only data volume needed - code is in image
       - ./services/openwebui/data:/data
-    working_dir: /opt
+    working_dir: /app
     entrypoint:
       - python
-      - /opt/reestr_sync.py
+      - /app/reestr_sync.py
       - --db
       - /data/webui.db
       - --function-id
