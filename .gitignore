@@ -17,13 +17,17 @@ logs/*
 services/postgres/data/
 services/openwebui/data/
 services/semantic/synonyms.json
-services/semantic/model
 services/starter/build/
 
 workflow.excalidraw
 *.bak
 *.todo
 *__pycache__
+
+# Python cache in src/
+src/**/__pycache__/
+src/**/*.pyc
 promt.md
 
 DOCKER_OPTIMIZATION_PLAN.md
+services/semantic/model/

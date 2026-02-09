@@ -51,8 +51,11 @@ fi
 if [[ -d "$TARGET_DIR/.git" ]]; then
   info "Directory '$TARGET_DIR' already exists. Reusing existing clone."
 else
-  info "Cloning repository into $TARGET_DIR"
-  git clone "$REPO_URL" "$TARGET_DIR"
+  info "Cloning repository (sparse checkout - production files only)"
+  git clone --depth 1 --filter=blob:none --sparse "$REPO_URL" "$TARGET_DIR"
+  cd "$TARGET_DIR"
+  git sparse-checkout set compose.yaml .env.example services/semantic/ services/openwebui/
+  cd - >/dev/null
 fi
 
 cd "$TARGET_DIR"
@@ -95,7 +98,8 @@ else
 fi
 
 info "Starting services: ${SERVICES[*]}"
-sudo docker compose up -d --build "${SERVICES[@]}"
+sudo docker compose pull "${SERVICES[@]}"
+sudo docker compose up -d "${SERVICES[@]}"
 
 cat <<'EOF'
 🎉 GISP stack is up and running.

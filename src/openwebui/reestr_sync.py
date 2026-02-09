@@ -5,6 +5,8 @@ description: Исправлены fallback-блоки: повторный пои
 version: 1.7.32
 """
 
+from __future__ import annotations
+
 import re
 import time
 import json
@@ -1999,9 +2001,7 @@ class Pipe:
         return body_text
 
 # ==========================================
-# SYNC FUNCTIONALITY
 # ==========================================
-from __future__ import annotations
 
 import argparse
 import json

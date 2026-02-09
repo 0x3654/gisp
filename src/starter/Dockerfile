@@ -21,9 +21,9 @@ RUN apk add --no-cache \
     && adduser -D -u 10001 -G appuser -h /app -s /bin/bash appuser
 
 # Copy entrypoint script (includes restore logic - combined into single file)
-COPY --chown=appuser:appuser services/starter/entrypoint.sh /entrypoint.sh
+COPY --chown=appuser:appuser src/starter/entrypoint.sh /entrypoint.sh
 
-# Copy snapshot (readable by all)
+# Copy snapshot (readable by all) - runtime data from services/starter/build/
 COPY services/starter/build/registry_start_snapshot.sql.gz /app/
 
 # Make entrypoint executable

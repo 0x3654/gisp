@@ -28,7 +28,7 @@
 Выполните bootstrap-скрипт (скачивает ~3 ГБ образов и ~1 ГБ данных, останавливается при любой ошибке):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/0x3654/gisp/master/scripts/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/0x3654/gisp/master/bootstrap.sh | bash
 ```
 
 Скрипт установит Docker/Compose/Git, клонирует репозиторий, подготовит конфиги, загрузит стартовый дамп через `starter-dump` и запустит контейнеры `postgres_registry`, `api`, `import`, `semantic`, `openwebui`. После завершения откройте http://localhost:3333 admin@gisp.ru 123
@@ -80,12 +80,36 @@ curl -fsSL https://raw.githubusercontent.com/0x3654/gisp/master/scripts/bootstra
 
 7. Запустите стек:
    ```bash
-   docker compose up -d --build postgres_registry api import semantic openwebui
+   docker compose pull  # Подтянуть последние образы из Docker Hub
+   docker compose up -d postgres_registry api import semantic openwebui
    ```
 
 # **Структура проекта**
 
-Контейнеры и их Dockerfile'ы лежат в каталоге `services/<name>` (api, import, semantic, openwebui и т.д.).
+```
+/src/                    # Весь исходный код (включая Dockerfile)
+├── api/                 # FastAPI-шлюз
+├── import/              # Фоновый импортёр
+├── openwebui/           # OpenWebUI-sync сервисы
+├── semantic/            # Семантический сервис (Dockerfile.onnx, Dockerfile.pytorch)
+└── starter/             # Starter service (Dockerfile, entrypoint.sh)
+
+/services/               # Только runtime данные
+├── postgres/data/       # PostgreSQL файлы БД
+├── openwebui/data/      # SQLite DB, кэш, модели
+├── semantic/            # Конфигурация (synonyms.json)
+└── starter/build/       # Дампы БД
+
+compose.yaml             # Docker Compose конфигурация
+.env.example             # Шаблон конфигурации
+bootstrap.sh             # Скрипт быстрого деплоя
+```
+
+**Ключевые особенности:**
+- Весь исходный код в `/src/` (Git repository)
+- Runtime данные в `/services/` (только на проде)
+- Pre-built Docker образы (собираются через CI/CD)
+- Bootstrap использует `git sparse-checkout` (качает только нужное)
 <!-- Схема обработки сообщений и взаимодействия с API (Excalidraw): см. файл docs/workflow.excalidraw -->
 
 <picture>
@@ -178,8 +202,6 @@ curl -fsSL https://raw.githubusercontent.com/0x3654/gisp/master/scripts/bootstra
 > **Что содержит снепшот:**
 > - ✅ `registry.reestr` — записи реестра (~531K строк, ~902MB сжато)
 > - ✅ `registry.semantic_items` — векторные эмбеддинги для семантического поиска
-> - ❌ `registry.load_log` — история загрузок (не сохраняется)
-> - ❌ `registry.semantic_query_cache` — кеш запросов (восстановится сам)
 >
 > **Примечание:** Сервис запускается один раз, выполняет восстановление и завершается с кодом 0.
 
@@ -414,8 +436,8 @@ curl -fsSL https://raw.githubusercontent.com/0x3654/gisp/master/scripts/bootstra
 ##### **Словарь синонимов**
 - Расположен в `services/semantic/synonyms.json` и содержит пары вида `"ключевое слово": ["вариант1", "вариант2"]`.
 - Храните ключи и значения в нижнем регистре, чтобы совпадения учитывались независимо от исходного написания.
-- После правок пересоберите `semantic` (`docker compose build semantic && docker compose up -d semantic`), чтобы обновить кэш модели.
-- OpenWebUI автоматически подхватит новые синонимы: дополнительные запросы (например, «сода» → «гидрокарбонат натрия») пойдут в работу сразу после пересборки контейнера.
+- Файл монтируется как volume, поэтому изменения подхватываются semantic-сервисом **без пересборки контейнера** (достаточно перезапустить: `docker compose restart semantic`).
+- OpenWebUI автоматически подхватит новые синонимы: дополнительные запросы (например, «сода» → «гидрокарбонат натрия») пойдут в работу сразу после перезапуска semantic-сервиса.
 
 #### `_format_table(rows, meta, max_rows)`
 

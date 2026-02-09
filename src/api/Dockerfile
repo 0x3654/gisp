@@ -15,7 +15,10 @@ RUN apk add --no-cache \
 # Install Python packages to /install directory
 # These will be copied to final stage, build tools stay behind
 RUN pip install --no-cache-dir --target=/install \
-    psycopg2==2.9.9 \
+    fastapi==0.115.6 \
+    uvicorn[standard]==0.34.0 \
+    psycopg2==2.9.10 \
+    aiofiles==24.1.0 \
     requests==2.32.3
 
 # ===================================
@@ -28,18 +31,16 @@ ARG VERSION=1.0
 
 # Metadata labels
 LABEL maintainer="gisp-team"
-LABEL service="import"
+LABEL service="api"
 LABEL version=$VERSION
 LABEL org.opencontainers.image.source="https://github.com/0x3654/gisp"
 
 # Environment variables
-ENV TZ=UTC \
+ENV TZ=Europe/Moscow \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    CRON_IMPORT_SCHEDULE="5 0 * * *" \
-    CRON_MAINTENANCE_SCHEDULE="0 5 * * *"
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Set working directory
 WORKDIR /app
@@ -47,7 +48,6 @@ WORKDIR /app
 # Install ONLY runtime dependencies (no gcc, no build tools!)
 RUN apk add --no-cache \
     postgresql-client \
-    bash \
     curl \
     && ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime \
     && echo ${TZ} > /etc/timezone \
@@ -56,30 +56,17 @@ RUN apk add --no-cache \
 # Copy compiled Python packages from builder
 COPY --from=builder /install /usr/local/lib/python3.12/site-packages
 
-# Copy scripts and entrypoint (with ownership)
-COPY --chown=appuser:appuser scripts /scripts
-COPY --chown=appuser:appuser entrypoint.sh /usr/local/bin/entrypoint.sh
+# Copy uvicorn CLI (installed to /install/bin by pip install --target)
+COPY --from=builder /install/bin/uvicorn /usr/local/bin/uvicorn
 
-# Configure cron and set permissions
-RUN chmod +x /scripts/* /usr/local/bin/entrypoint.sh \
-    && mkdir -p /etc/cron.d \
-    && cat <<'EOF' > /etc/cron.d/registry-cron \
-    && chmod 0644 /etc/cron.d/registry-cron \
-    && touch /var/log/cron.log \
-    && chmod 0644 /var/log/cron.log \
-    && chown appuser:appuser /var/log/cron.log
-SHELL=/bin/bash
-PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
-${CRON_IMPORT_SCHEDULE:-5 0 * * *} appuser /scripts/run_import.sh >> /var/log/cron.log 2>&1
-${CRON_MAINTENANCE_SCHEDULE:-0 5 * * *} appuser /scripts/run_pg_maintenance.sh >> /var/log/cron.log 2>&1
-EOF
+# Copy application code (with ownership)
+COPY --chown=appuser:appuser ./src/api /app
 
-# Healthcheck (will be overridden by compose.yaml, but useful for local runs)
-HEALTHCHECK --interval=60s --timeout=10s --start-period=60s --retries=3 \
-    CMD pg_isready -h postgres_registry -U postgres && pidof crond >/dev/null
+# Expose port
+EXPOSE 8000
 
 # Run as non-root user
 USER appuser
 
-# Use entrypoint for proper initialization and signal handling
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+# Run application
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
