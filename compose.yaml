@@ -63,6 +63,9 @@ services:
     networks:
         - internal
   import:
+    build:
+      context: .
+      dockerfile: src/import/Dockerfile
     image: docker.io/0x3654/gisp-import:latest
     container_name: gisp_import
     env_file: .env

@@ -15,7 +15,7 @@ RUN apk add --no-cache \
 # Install Python packages to /install directory
 # These will be copied to final stage, build tools stay behind
 RUN pip install --no-cache-dir --target=/install \
-    psycopg2==2.9.9 \
+    psycopg2==2.9.10 \
     requests==2.32.3
 
 # ===================================
@@ -56,9 +56,9 @@ RUN apk add --no-cache \
 # Copy compiled Python packages from builder
 COPY --from=builder /install /usr/local/lib/python3.12/site-packages
 
-# Copy scripts and entrypoint (with ownership)
-COPY --chown=appuser:appuser scripts /scripts
-COPY --chown=appuser:appuser entrypoint.sh /usr/local/bin/entrypoint.sh
+# Copy application code (with ownership)
+COPY --chown=appuser:appuser ./src/import/scripts /scripts
+COPY --chown=appuser:appuser ./src/import/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Configure cron and set permissions
 RUN chmod +x /scripts/* /usr/local/bin/entrypoint.sh \
