@@ -1,4 +1,6 @@
 # syntax=docker/dockerfile:1.6
+# Optimized ONNX Runtime build for AMD64 (Intel/AMD servers)
+# Python 3.12 with pymorphy3 (modern stack)
 
 # ===================================
 # BUILDER STAGE - Compile dependencies
@@ -6,8 +8,10 @@
 FROM python:3.12-slim AS builder
 
 # Build arguments
-ARG VERSION=2.0
-ARG USE_ONNX=true
+ARG VERSION=2.2
+ARG HF_TOKEN
+ARG HF_MODEL_ID="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+ARG ONNX_HF_MODEL_ID="onnx-models/paraphrase-multilingual-MiniLM-L12-v2-onnx"
 
 # Install build-time system dependencies (including psycopg2 build deps)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -17,55 +21,46 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install ML dependencies to /install directory
-# ONNX Runtime instead of PyTorch for faster inference (~80 MB vs ~700 MB)
+# Install ONNX Runtime and transformers (includes compatible tokenizers)
+# Note: We need transformers for compatible tokenizer, huggingface_hub removed from runtime
 RUN pip install --no-cache-dir --upgrade pip \
-    && if [ "$USE_ONNX" = "true" ]; then \
-        pip install --no-cache-dir --target=/install \
-            "onnxruntime==1.19.2" \
-            "optimum[onnxruntime]==1.21.0" \
-            "transformers==4.46.0"; \
-       else \
-        pip install --no-cache-dir \
-            --index-url https://download.pytorch.org/whl/cpu \
-            --target /install \
-            "torch==2.3.1"; \
-       fi
+    && pip install --no-cache-dir --target=/install \
+        "onnxruntime==1.19.2" \
+        "transformers==4.42.0" \
+    && rm -rf /root/.cache/pip
 
-# Install application dependencies to /install directory
+# Install sentence-transformers with --no-deps (compatibility layer only)
+RUN pip install --no-cache-dir --target=/install \
+    sentence-transformers==3.0.1 --no-deps \
+    && rm -rf /root/.cache/pip
+
+# Install remaining dependencies
+# Note: huggingface_hub is only needed in model-downloader stage, not runtime
+# Note: transliterate removed (not used in code)
+# Note: pymorphy3 for Python 3.12 compatibility (instead of pymorphy2)
+# Note: setuptools<74 required for pymorphy3 (pkg_resources was removed in later versions)
 RUN pip install --no-cache-dir --target=/install \
     fastapi==0.115.0 \
     uvicorn[standard]==0.32.0 \
-    transliterate==1.0.0 \
-    pymorphy2==0.9.1 \
+    pymorphy3==1.2.0 \
     nltk==3.9.1 \
     requests==2.32.3 \
     psycopg2==2.9.9 \
-    "huggingface_hub==0.23.2" \
-    && if [ "$USE_ONNX" = "true" ]; then \
-        pip install --no-cache-dir --target=/install --no-deps \
-            "sentence-transformers==3.0.1"; \
-       else \
-        pip install --no-cache-dir --target=/install --no-deps \
-            "sentence-transformers==3.0.1"; \
-       fi
+    "numpy<2.0" \
+    "setuptools<74" \
+    && rm -rf /root/.cache/pip
 
 # ===================================
-# MODEL DOWNLOADER STAGE - Download ML models
+# MODEL DOWNLOADER STAGE - Download ONNX model
 # ===================================
 FROM python:3.12-slim AS model-downloader
 
-# Build arguments
-ARG USE_ONNX=true
-ARG HF_MODEL_ID="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+ARG HF_TOKEN
 ARG ONNX_HF_MODEL_ID="onnx-models/paraphrase-multilingual-MiniLM-L12-v2-onnx"
 ARG HF_ENDPOINT="https://huggingface.co"
-ARG HF_TOKEN
 
 # Environment for model download
-ENV USE_ONNX=${USE_ONNX} \
-    HF_MODEL_ID=${HF_MODEL_ID} \
-    ONNX_HF_MODEL_ID=${ONNX_HF_MODEL_ID} \
+ENV ONNX_HF_MODEL_ID=${ONNX_HF_MODEL_ID} \
     HF_ENDPOINT=${HF_ENDPOINT} \
     MODEL_DIR=/models
 
@@ -75,10 +70,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir "huggingface_hub==0.23.2"
 
-# Download ML models at build time using HF token from CI/CD
-# For ONNX: downloads pre-converted ONNX model with pooling included
-# For PyTorch: downloads safetensors model
-# Models are NOT in repository - they're downloaded during build
+# Download ONNX model at build time using HF token from CI/CD
+# ONNX model already includes pooling layer
 RUN --mount=type=secret,id=hf_token,target=/tmp/hf_token \
     python - <<'PY' && rm -rf /root/.cache/huggingface /tmp/* ~/.cache
 import os
@@ -89,8 +82,7 @@ for offline_var in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"):
 
 from huggingface_hub import snapshot_download
 
-use_onnx = os.environ.get("USE_ONNX", "true").lower() == "true"
-repo_id = os.environ.get("ONNX_HF_MODEL_ID" if use_onnx else "HF_MODEL_ID")
+repo_id = os.environ.get("ONNX_HF_MODEL_ID")
 target = os.environ.get("MODEL_DIR", "/models")
 token_file = Path("/tmp/hf_token")
 token = None
@@ -101,38 +93,20 @@ elif os.environ.get("HF_TOKEN"):
     token = os.environ.get("HF_TOKEN")
 endpoint = os.environ.get("HF_ENDPOINT") or None
 
-if use_onnx:
-    # Download ONNX model (already includes pooling)
-    allow_patterns = [
-        "README.md",
-        "config.json",
-        "config_sentence_transformers.json",
-        "modules.json",
-        "sentence_bert_config.json",
-        "special_tokens_map.json",
-        "tokenizer.json",
-        "tokenizer_config.json",
-        "vocab.txt",
-        "unigram.json",
-        "model.onnx",  # ONNX model with Transformer+Pooling
-        "model_quantized.onnx",  # Optional: quantized version
-    ]
-else:
-    # Download PyTorch safetensors model
-    allow_patterns = [
-        "README.md",
-        "config.json",
-        "config_sentence_transformers.json",
-        "modules.json",
-        "sentence_bert_config.json",
-        "special_tokens_map.json",
-        "tokenizer.json",
-        "tokenizer_config.json",
-        "vocab.txt",
-        "unigram.json",
-        "1_Pooling/*",
-        "model.safetensors",
-    ]
+# Download ONNX model files only
+allow_patterns = [
+    "README.md",
+    "config.json",
+    "config_sentence_transformers.json",
+    "modules.json",
+    "sentence_bert_config.json",
+    "special_tokens_map.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "vocab.txt",
+    "unigram.json",
+    "model.onnx",  # ONNX model with Transformer+Pooling
+]
 
 snapshot_download(
     repo_id=repo_id,
@@ -148,9 +122,7 @@ PY
 # ===================================
 FROM python:3.12-slim
 
-# Build arguments
-ARG VERSION=2.0
-ARG USE_ONNX=true
+ARG VERSION=2.2
 ARG HF_MODEL_ID="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 ARG HF_ENDPOINT="https://huggingface.co"
 
@@ -158,9 +130,9 @@ ARG HF_ENDPOINT="https://huggingface.co"
 LABEL maintainer="gisp-team"
 LABEL service="semantic"
 LABEL version=$VERSION
-LABEL org.opencontainers.image.source="https://github.com/0x3654/gisp"
 LABEL runtime="onnxruntime" \
         runtime.version="1.19.2"
+LABEL org.opencontainers.image.source="https://github.com/0x3654/gisp"
 
 # Environment variables
 ENV TZ=Europe/Moscow \
@@ -168,10 +140,11 @@ ENV TZ=Europe/Moscow \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    USE_ONNX=${USE_ONNX} \
+    USE_ONNX=true \
     HF_MODEL_ID=${HF_MODEL_ID} \
     HF_ENDPOINT=${HF_ENDPOINT} \
-    MODEL_DIR=/app/model
+    MODEL_DIR=/app/model \
+    SEMANTIC_CACHE_TTL_SECONDS=0
 
 # Set working directory
 WORKDIR /app
@@ -179,6 +152,7 @@ WORKDIR /app
 # Install runtime system dependencies (no build tools!)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Python packages from /install directory (much smaller than all site-packages)
@@ -200,4 +174,4 @@ EXPOSE 8010
 USER appuser
 
 # Run application
-CMD ["uvicorn", "semantic_service:app", "--host", "0.0.0.0", "--port", "8010"]
+CMD ["python", "-m", "uvicorn", "semantic_service:app", "--host", "0.0.0.0", "--port", "8010"]

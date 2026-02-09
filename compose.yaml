@@ -136,8 +136,17 @@ services:
     depends_on:
       - openwebui
     restart: "no"
+
+  # Semantic service (sentence embeddings)
+  # По умолчанию использует gisp-semantic-onnx (оптимально для обеих архитектур)
+  # Для переключения на PyTorch замените image: на docker.io/0x3654/gisp-semantic-pytorch:latest
+  # Бенчмарки Python 3.12 + pymorphy3:
+  # - AMD64 ONNX: ~1.03GB, 27-32ms (рекомендуется)
+  # - AMD64 PyTorch: ~1.93GB, 28-35ms
+  # - ARM64 ONNX: ~1.69GB, 37-44ms (рекомендуется)
+  # - ARM64 PyTorch: ~2.46GB, 104-186ms
   semantic:
-    image: docker.io/0x3654/gisp-semantic:latest
+    image: docker.io/0x3654/gisp-semantic-onnx:latest
     container_name: gisp_semantic_service
     env_file: .env
     environment:
@@ -147,6 +156,8 @@ services:
     volumes:
       - ./services/semantic/synonyms.json:/app/synonyms.json:ro
     command:
+      - python
+      - -m
       - uvicorn
       - semantic_service:app
       - --host
@@ -180,7 +191,7 @@ services:
     networks:
       - internal
   embeddings-worker:
-    image: docker.io/0x3654/gisp-semantic:latest
+    image: docker.io/0x3654/gisp-semantic-onnx:latest
     profiles:
       - embeddings
     env_file: .env

@@ -7,7 +7,8 @@ on:
     paths:
       - "services/semantic/semantic_service.py"
       - "services/semantic/model_loader.py"
-      - "services/semantic/Dockerfile"
+      - "services/semantic/Dockerfile.onnx"
+      - "services/semantic/Dockerfile.pytorch"
       - ".github/workflows/build-semantic-image.yml"
   workflow_dispatch:
 
@@ -34,22 +35,51 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push semantic image (multi-arch)
+      # ===================================
+      # Build ONNX images (recommended)
+      # ===================================
+      - name: Build and push ONNX images (amd64 + arm64)
         uses: docker/build-push-action@v5
         with:
           context: ./services/semantic
+          file: ./services/semantic/Dockerfile.onnx
           push: true
           build-args: |
             HF_TOKEN=${{ env.HF_TOKEN }}
           platforms: linux/amd64,linux/arm64
           tags: |
-            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
-            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/gisp-semantic-onnx:latest
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/gisp-semantic-onnx:2.2
 
-      - name: Make repository public
+      # ===================================
+      # Build PyTorch images (alternative)
+      # ===================================
+      - name: Build and push PyTorch images (amd64 + arm64)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/semantic
+          file: ./services/semantic/Dockerfile.pytorch
+          push: true
+          build-args: |
+            HF_TOKEN=${{ env.HF_TOKEN }}
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/gisp-semantic-pytorch:latest
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/gisp-semantic-pytorch:2.2
+
+      # Make repositories public
+      - name: Make ONNX repository public
         run: |
           curl -X PATCH \
             -H "Authorization: Bearer ${{ secrets.DOCKERHUB_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d '{"is_private": false}' \
-            https://hub.docker.com/v2/repositories/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}/ || true
+            https://hub.docker.com/v2/repositories/${{ secrets.DOCKERHUB_USERNAME }}/gisp-semantic-onnx/ || true
+
+      - name: Make PyTorch repository public
+        run: |
+          curl -X PATCH \
+            -H "Authorization: Bearer ${{ secrets.DOCKERHUB_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"is_private": false}' \
+            https://hub.docker.com/v2/repositories/${{ secrets.DOCKERHUB_USERNAME }}/gisp-semantic-pytorch/ || true
