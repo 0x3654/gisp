@@ -25,8 +25,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Note: We need transformers for compatible tokenizer, huggingface_hub removed from runtime
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir --target=/install \
-        "onnxruntime==1.19.2" \
-        "transformers==4.42.0" \
+        "onnxruntime==1.23.2" \
+        "transformers==4.48.0" \
     && rm -rf /root/.cache/pip
 
 # Install sentence-transformers with --no-deps (compatibility layer only)
@@ -40,14 +40,14 @@ RUN pip install --no-cache-dir --target=/install \
 # Note: pymorphy3 for Python 3.12 compatibility (instead of pymorphy2)
 # Note: setuptools<74 required for pymorphy3 (pkg_resources was removed in later versions)
 RUN pip install --no-cache-dir --target=/install \
-    fastapi==0.115.0 \
-    uvicorn[standard]==0.32.0 \
-    pymorphy3==1.2.0 \
+    fastapi==0.115.6 \
+    uvicorn[standard]==0.34.0 \
+    pymorphy3==1.2.1 \
     nltk==3.9.1 \
     requests==2.32.3 \
-    psycopg2==2.9.9 \
+    psycopg2==2.9.10 \
     "numpy<2.0" \
-    "setuptools<74" \
+    "setuptools<75" \
     && rm -rf /root/.cache/pip
 
 # ===================================
@@ -131,7 +131,7 @@ LABEL maintainer="gisp-team"
 LABEL service="semantic"
 LABEL version=$VERSION
 LABEL runtime="onnxruntime" \
-        runtime.version="1.19.2"
+        runtime.version="1.23.2"
 LABEL org.opencontainers.image.source="https://github.com/0x3654/gisp"
 
 # Environment variables
