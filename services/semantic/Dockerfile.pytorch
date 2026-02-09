@@ -39,20 +39,20 @@ RUN pip install --no-cache-dir --target=/install \
 # Note: huggingface_hub is only needed in model-downloader stage, not runtime
 # Note: transliterate removed (not used in code)
 # Note: pymorphy3 for Python 3.12 compatibility
-# Note: setuptools<74 required for pymorphy3 (pkg_resources was removed in later versions)
+# Note: setuptools<75 required for pymorphy3 compatibility
 # Note: scikit-learn and Pillow required by sentence_transformers
 RUN pip install --no-cache-dir --target=/install \
-    fastapi==0.115.0 \
-    uvicorn[standard]==0.32.0 \
-    pymorphy3==1.2.0 \
+    fastapi==0.115.6 \
+    uvicorn[standard]==0.34.0 \
+    pymorphy3==1.2.1 \
     nltk==3.9.1 \
     requests==2.32.3 \
-    psycopg2==2.9.9 \
-    "transformers==4.42.0" \
-    "scikit-learn==1.5.2" \
-    "Pillow==10.4.0" \
-    numpy \
-    "setuptools<74" \
+    psycopg2==2.9.10 \
+    "transformers==4.48.0" \
+    "scikit-learn==1.6.1" \
+    "Pillow==11.1.0" \
+    "numpy<2.0" \
+    "setuptools<75" \
     && rm -rf /root/.cache/pip
 
 # ===================================
