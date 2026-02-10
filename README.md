@@ -33,6 +33,8 @@ curl -fsSL https://raw.githubusercontent.com/0x3654/gisp/master/bootstrap.sh | b
 
 Скрипт установит Docker/Compose/Git, клонирует репозиторий, подготовит конфиги, загрузит стартовый дамп через `starter-dump` и запустит контейнеры `postgres_registry`, `api`, `import`, `semantic`, `openwebui`. После завершения откройте http://localhost:3333 admin@gisp.ru 123
 
+**Примечание:** Для продакшен деплоя и управления рекомендуем использовать Ansible роль: [0x3654/ansible](https://github.com/0x3654/ansible/tree/main/roles/gisp)
+
 # **Установка**
 
 1. Клонируйте репозиторий:
@@ -105,11 +107,20 @@ compose.yaml             # Docker Compose конфигурация
 bootstrap.sh             # Скрипт быстрого деплоя
 ```
 
-**Ключевые особенности:**
-- Весь исходный код в `/src/` (Git repository)
-- Runtime данные в `/services/` (только на проде)
-- Pre-built Docker образы (собираются через CI/CD)
-- Bootstrap использует `git sparse-checkout` (качает только нужное)
+**Ключевые особенности архитектуры:**
+- **Исходный код** в `/src/` (Git tracked) — Dockerfiles и Python код
+- **Runtime данные** в `/services/` — данные БД, кэши, конфиги
+- **Pre-built образы** — собираются через GitHub Actions CI/CD
+- **Multi-arch** поддержка — linux/amd64 и linux/arm64
+
+**CI/CD workflows:**
+- `build-api-image.yml` → `gisp-api:latest`
+- `build-import-image.yml` → `gisp-import:latest`
+- `build-semantic-image.yml` → `gisp-semantic-onnx:latest` + `gisp-semantic-pytorch:latest`
+- `build-openwebui-sync-image.yml` → `gisp-openwebui-sync:latest`
+- `build-starter-image.yml` → `gisp-starter:latest`
+
+
 <!-- Схема обработки сообщений и взаимодействия с API (Excalidraw): см. файл docs/workflow.excalidraw -->
 
 <picture>
