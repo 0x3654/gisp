@@ -50,13 +50,46 @@ def compose_filename(dt: datetime) -> Tuple[str, str]:
 def try_fetch(date_candidate: datetime) -> Optional[bytes]:
     url = BASE_URL.format(date=date_candidate.strftime("%Y%m%d"))
     headers = {"User-Agent": USER_AGENT}
-    response = requests.get(url, headers=headers, timeout=30)
-    if response.status_code == 404:
-        return None
-    response.raise_for_status()
-    if not response.content:
-        raise RuntimeError("Получен пустой ответ от источника")
-    return response.content
+
+    # Retry logic with exponential backoff
+    max_retries = 3
+    base_timeout = 60  # Increased from 30 to 60 seconds
+
+    for attempt in range(max_retries):
+        try:
+            timeout = base_timeout * (2 ** attempt)  # 60s, 120s, 240s
+            print(f"🔄 Попытка {attempt + 1}/{max_retries} для {date_candidate:%d.%m.%Y} (timeout={timeout}s)...", flush=True)
+            response = requests.get(url, headers=headers, timeout=timeout)
+
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+
+            if not response.content:
+                raise RuntimeError("Получен пустой ответ от источника")
+
+            print(f"✅ Успешно скачано за {attempt + 1} попытки", flush=True)
+            return response.content
+
+        except requests.HTTPError as http_err:
+            if attempt == max_retries - 1:
+                print(f"⚠️  HTTP ошибка {http_err.response.status_code} на попытке {attempt + 1}", flush=True)
+            if attempt < max_retries - 1:
+                wait_time = 5 * (2 ** attempt)  # Exponential backoff: 5s, 10s, 20s
+                print(f"⏳ Повторная попытка через {wait_time} сек...", flush=True)
+                import time
+                time.sleep(wait_time)
+            else:
+                raise
+
+        except requests.RequestException as req_err:
+            if attempt < max_retries - 1:
+                print(f"⚠️  Ошибка соединения на попытке {attempt + 1}: {req_err}", flush=True)
+            if attempt == max_retries - 1:
+                raise
+            # Continue retry loop
+
+    return None  # All retries exhausted
 
 
 def compute_sha256(data: bytes) -> str:
@@ -97,20 +130,12 @@ def find_latest_payload(last_existing: Optional[datetime]) -> Optional[Tuple[dat
             print(f"✅  Уже скачан: {name}, дальше искать не нужно.")
             return None
 
-        try:
-            payload = try_fetch(current)
-        except requests.HTTPError as http_err:
-            print(
-                f"⚠️  Пропущена дата {current:%d.%m.%Y}: HTTP {http_err.response.status_code}",
-                file=sys.stderr,
-            )
-        except requests.RequestException as req_err:
-            print(f"⚠️  Пропущена дата {current:%d.%m.%Y}: {req_err}", file=sys.stderr)
-        except RuntimeError as runtime_err:
-            print(f"⚠️  Пропущена дата {current:%d.%m.%Y}: {runtime_err}", file=sys.stderr)
-        else:
-            if payload:
-                return current, payload
+        payload = try_fetch(current)
+        if payload:
+            return current, payload
+
+        # If fetch failed (returned None), move to previous day
+        print(f"ℹ️  Дата {current:%d.%m.%Y} не доступна, пробуем предыдущий день...", flush=True)
         current -= timedelta(days=1)
 
     print("⚠️  Не удалось скачать новые CSV.", file=sys.stderr)

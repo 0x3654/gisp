@@ -98,7 +98,7 @@ if [[ "$AUTO_EMBED" != "1" ]]; then
   echo "[INFO] Автообновление эмбеддингов отключено (AUTO_EMBED=$AUTO_EMBED)"
 fi
 
-  if ! python3 /scripts/download_csvs.py new >/dev/null; then
+  if ! python3 /scripts/download_csvs.py latest; then
     cmd_status=$?
     record_failure "$cmd_status"
     echo "[ERROR] Ошибка скачивания CSV ($cmd_status)"
