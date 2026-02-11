@@ -72,12 +72,21 @@ send_telegram() {
   local message="$1"
   if [[ -n "${BOT_TOKEN:-}" && -n "${CHAT_ID:-}" ]]; then
     local log_path=$(realpath "$LOG_FILE")
-    curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
+    echo "[INFO] Отправка уведомления в Telegram..." >&2
+    local response=$(curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
       -F chat_id="${CHAT_ID}" \
       -F caption="${message}" \
-      -F document=@"$log_path" > /dev/null || echo "[WARN] Не удалось отправить файл в Telegram" >> "$LOG_FILE"
+      -F document=@"$log_path" 2>&1)
+    if echo "$response" | grep -q '"ok":false'; then
+      echo "[ERROR] Ошибка Telegram API: $response" >&2
+      return 1
+    elif [[ -n "$response" ]]; then
+      echo "[INFO] Уведомление отправлено успешно" >&2
+    else
+      echo "[WARN] Пустой ответ от Telegram API" >&2
+    fi
   else
-    echo "[WARN] Переменные Telegram не заданы" >> "$LOG_FILE"
+    echo "[WARN] Переменные Telegram не заданы" >&2
   fi
 }
 # ------------------------------------------
