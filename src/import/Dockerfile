@@ -61,17 +61,18 @@ COPY --chown=appuser:appuser ./src/import/scripts /scripts
 COPY --chown=appuser:appuser ./src/import/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Configure cron and set permissions
+# NOTE: busybox crond reads from /etc/crontabs/, NOT /etc/cron.d/
 RUN chmod +x /scripts/* /usr/local/bin/entrypoint.sh \
-    && mkdir -p /etc/cron.d \
-    && cat <<'EOF' > /etc/cron.d/registry-cron \
-    && chmod 0644 /etc/cron.d/registry-cron \
+    && mkdir -p /etc/crontabs \
+    && cat <<'EOF' > /etc/crontabs/appuser \
+    && chmod 0644 /etc/crontabs/appuser \
     && touch /var/log/cron.log \
     && chmod 0644 /var/log/cron.log \
     && chown appuser:appuser /var/log/cron.log
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
-${CRON_IMPORT_SCHEDULE:-5 0 * * *} appuser /scripts/run_import.sh >> /var/log/cron.log 2>&1
-${CRON_MAINTENANCE_SCHEDULE:-0 5 * * *} appuser /scripts/run_pg_maintenance.sh >> /var/log/cron.log 2>&1
+${CRON_IMPORT_SCHEDULE:-5 0 * * *} /scripts/run_import.sh >> /var/log/cron.log 2>&1
+${CRON_MAINTENANCE_SCHEDULE:-0 5 * * *} /scripts/run_pg_maintenance.sh >> /var/log/cron.log 2>&1
 EOF
 
 # Healthcheck (will be overridden by compose.yaml, but useful for local runs)
