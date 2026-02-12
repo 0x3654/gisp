@@ -31,6 +31,8 @@ services:
   api:
     image: docker.io/0x3654/gisp-api:latest
     container_name: gisp_api
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
     env_file: .env
     environment:
       - TZ=${TZ:-Europe/Moscow}
@@ -62,6 +64,8 @@ services:
   import:
     image: docker.io/0x3654/gisp-import:latest
     container_name: gisp_import
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
     env_file: .env
     environment:
       - TZ=${TZ:-Europe/Moscow}  # Container timezone (cron uses this for schedule)
@@ -121,6 +125,8 @@ services:
   openwebui-sync:
     image: docker.io/0x3654/gisp-openwebui-sync:latest
     container_name: gisp_openwebui-sync
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
     profiles: ["tools"]
     volumes:
       # Only data volume needed - code is in image
@@ -147,6 +153,8 @@ services:
   semantic:
     image: docker.io/0x3654/gisp-semantic-onnx:latest
     container_name: gisp_semantic_service
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
     env_file: .env
     environment:
       - PYTHONPATH=/app
@@ -191,6 +199,8 @@ services:
       - internal
   embeddings-worker:
     image: docker.io/0x3654/gisp-semantic-onnx:latest
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
     profiles:
       - embeddings
     env_file: .env
@@ -223,6 +233,8 @@ services:
   starter-dump:
     image: docker.io/0x3654/gisp-starter:latest
     container_name: gisp_starter_dump
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
     profiles:
       - starter
     env_file: .env
