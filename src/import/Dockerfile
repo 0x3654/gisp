@@ -63,8 +63,13 @@ COPY --chown=appuser:appuser ./src/import/entrypoint.sh /usr/local/bin/entrypoin
 # Configure cron directories and set permissions
 # NOTE: busybox crond reads from /etc/crontabs/, NOT /etc/cron.d/
 # Crontab will be generated at runtime by entrypoint.sh from environment variables
+# Remove default root crontab to avoid Permission denied errors when running as appuser
 RUN chmod +x /scripts/* /usr/local/bin/entrypoint.sh \
     && mkdir -p /etc/crontabs \
+    && rm -f /etc/crontabs/root \
+    && touch /etc/crontabs/appuser \
+    && chmod 0644 /etc/crontabs/appuser \
+    && chown appuser:appuser /etc/crontabs/appuser \
     && touch /var/log/cron.log \
     && chmod 0644 /var/log/cron.log \
     && chown appuser:appuser /var/log/cron.log
