@@ -53,11 +53,13 @@ def try_fetch(date_candidate: datetime) -> Optional[bytes]:
 
     # Retry logic with exponential backoff
     max_retries = 3
-    base_timeout = 60  # Increased from 30 to 60 seconds
+    quick_timeout = 10  # Quick timeout for first attempt (file either exists or 404 fast)
+    base_timeout = 60   # Longer timeout for retries (network issues)
 
     for attempt in range(max_retries):
         try:
-            timeout = base_timeout * (2 ** attempt)  # 60s, 120s, 240s
+            # First attempt: quick timeout, retries: longer timeout for slow downloads
+            timeout = quick_timeout if attempt == 0 else base_timeout * (2 ** (attempt - 1))
             print(f"🔄 Попытка {attempt + 1}/{max_retries} для {date_candidate:%d.%m.%Y} (timeout={timeout}s)...", flush=True)
             response = requests.get(url, headers=headers, timeout=timeout)
 

@@ -17,6 +17,7 @@ CRON_EOF
 echo "Starting initial import..."
 /scripts/run_import.sh &
 IMPORT_PID=$!
+IMPORT_COMPLETED=false
 
 # Start cron in background (Alpine uses busybox crond)
 echo "Starting cron service..."
@@ -25,8 +26,11 @@ CRON_PID=$!
 
 # Function to check if background processes are still running
 check_processes() {
-    if ! kill -0 $IMPORT_PID 2>/dev/null; then
-        echo "Import process has completed"
+    if [ -n "$IMPORT_PID" ] && ! kill -0 $IMPORT_PID 2>/dev/null; then
+        if [ "$IMPORT_COMPLETED" = "false" ]; then
+            echo "Import process has completed"
+            IMPORT_COMPLETED=true
+        fi
         IMPORT_PID=""
     fi
 
