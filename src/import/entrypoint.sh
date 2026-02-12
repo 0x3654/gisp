@@ -4,6 +4,15 @@ set -e
 # Trap signals for graceful shutdown
 trap 'echo "Received signal, shutting down..."; kill $(jobs -p); exit 0' SIGTERM SIGINT
 
+# Generate crontab from environment variables
+echo "Generating crontab from environment..."
+cat > /etc/crontabs/appuser << CRON_EOF
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+${CRON_IMPORT_SCHEDULE:-5 0 * * *} /scripts/run_import.sh >> /var/log/cron.log 2>&1
+${CRON_MAINTENANCE_SCHEDULE:-0 5 * * *} /scripts/run_pg_maintenance.sh >> /var/log/cron.log 2>&1
+CRON_EOF
+
 # Run initial import in background
 echo "Starting initial import..."
 /scripts/run_import.sh &

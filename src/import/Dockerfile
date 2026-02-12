@@ -60,20 +60,14 @@ COPY --from=builder /install /usr/local/lib/python3.12/site-packages
 COPY --chown=appuser:appuser ./src/import/scripts /scripts
 COPY --chown=appuser:appuser ./src/import/entrypoint.sh /usr/local/bin/entrypoint.sh
 
-# Configure cron and set permissions
+# Configure cron directories and set permissions
 # NOTE: busybox crond reads from /etc/crontabs/, NOT /etc/cron.d/
+# Crontab will be generated at runtime by entrypoint.sh from environment variables
 RUN chmod +x /scripts/* /usr/local/bin/entrypoint.sh \
     && mkdir -p /etc/crontabs \
-    && cat <<'EOF' > /etc/crontabs/appuser \
-    && chmod 0644 /etc/crontabs/appuser \
     && touch /var/log/cron.log \
     && chmod 0644 /var/log/cron.log \
     && chown appuser:appuser /var/log/cron.log
-SHELL=/bin/bash
-PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
-${CRON_IMPORT_SCHEDULE:-5 0 * * *} /scripts/run_import.sh >> /var/log/cron.log 2>&1
-${CRON_MAINTENANCE_SCHEDULE:-0 5 * * *} /scripts/run_pg_maintenance.sh >> /var/log/cron.log 2>&1
-EOF
 
 # Healthcheck (will be overridden by compose.yaml, but useful for local runs)
 HEALTHCHECK --interval=60s --timeout=10s --start-period=60s --retries=3 \
