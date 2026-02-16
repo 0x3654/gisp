@@ -60,6 +60,10 @@ COPY --from=builder /install /usr/local/lib/python3.12/site-packages
 COPY --chown=appuser:appuser ./src/import/scripts /scripts
 COPY --chown=appuser:appuser ./src/import/entrypoint.sh /usr/local/bin/entrypoint.sh
 
+# Create appuser home directory and profile with environment
+RUN mkdir -p /home/appuser && \
+    chown appuser:appuser /home/appuser
+
 # Configure cron directories and set permissions
 # NOTE: busybox crond reads from /etc/crontabs/, NOT /etc/cron.d/
 # Crontab will be generated at runtime by entrypoint.sh from environment variables
@@ -78,8 +82,5 @@ RUN chmod +x /scripts/* /usr/local/bin/entrypoint.sh \
 HEALTHCHECK --interval=60s --timeout=10s --start-period=60s --retries=3 \
     CMD pg_isready -h postgres_registry -U postgres && pidof crond >/dev/null
 
-# Run as non-root user
-USER appuser
-
-# Use entrypoint for proper initialization and signal handling
+# Run as root (crond needs root, but scripts will run as appuser via su in crontab)
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
