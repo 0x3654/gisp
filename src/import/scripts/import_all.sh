@@ -105,7 +105,7 @@ EOF
 )
 already_imported=$(echo "$already_imported" | tr -d '[:space:]')
 if [[ "$already_imported" == "1" ]]; then
-  echo "✅ Файл уже загружен в базу (load_log). Пропускаем импорт."
+  echo "✅ Файл уже загружен в базу. Пропускаем импорт."
   exit 0
 fi
 

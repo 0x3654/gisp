@@ -31,3 +31,7 @@ promt.md
 
 DOCKER_OPTIMIZATION_PLAN.md
 services/semantic/model/
+
+# Documentation (ignore all except README.md)
+*.md
+!README.md

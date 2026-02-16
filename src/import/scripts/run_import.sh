@@ -53,8 +53,8 @@ extract_summary() {
   local log_file="$1"
 
   # Проверяем особые случаи
-  if grep -q "⚠️  Не удалось скачать новые CSV\." "$log_file"; then
-    grep -E "⚠️  Не удалось скачать новые CSV\.|✅ Файл уже загружен в базу|ℹ️  Новых дат для скачивания нет|CSV-файлы в каталоге.*не найдены" "$log_file" | head -5
+  if grep -q "⚠️  Не удалось скачать CSV\." "$log_file"; then
+    grep -E "⚠️  Не удалось скачать CSV\.|✅ Файл уже загружен в базу|ℹ️  Новых дат для скачивания нет|CSV-файлы в каталоге.*не найдены" "$log_file" | head -5
     return
   fi
 
@@ -71,8 +71,35 @@ extract_summary() {
 send_telegram() {
   local message="$1"
   if [[ -n "${BOT_TOKEN:-}" && -n "${CHAT_ID:-}" ]]; then
-    local log_path=$(realpath "$LOG_FILE")
-    echo "[INFO] Отправка уведомления в Telegram..." >&2
+    # Retry logic for getting the log file path (handles race condition)
+    local log_path=""
+    local retries=3
+    local retry_delay=10
+
+    for ((i=1; i<=retries; i++)); do
+      # Ensure log file exists
+      if [[ -f "$LOG_FILE" ]]; then
+        # Sync to ensure file is written to disk
+        sync "$LOG_FILE" 2>/dev/null || true
+
+        log_path=$(realpath "$LOG_FILE")
+        if [[ -n "$log_path" ]] && [[ -f "$log_path" ]]; then
+          break
+        fi
+      fi
+
+      if [[ $i -lt $retries ]]; then
+        echo "[WARN] Лог-файл не найден (попытка $i/$retries), повтор через ${retry_delay}с..." >&2
+        sleep $retry_delay
+      fi
+    done
+
+    if [[ -z "$log_path" ]] || [[ ! -f "$log_path" ]]; then
+      echo "[ERROR] Не удалось получить путь к лог-файлу после $retries попыток: $LOG_FILE" >&2
+      return 1
+    fi
+
+    echo "[INFO] Отправка уведомления в Telegram (файл: $log_path)..." >&2
     local response=$(curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
       -F chat_id="${CHAT_ID}" \
       -F caption="${message}" \
@@ -162,6 +189,7 @@ echo "=============================================="
 
 if [[ $status -ne 0 ]]; then
   echo "[ERROR] Скрипт завершился с кодом $status" >> "$LOG_FILE"
+  sync "$LOG_FILE" 2>/dev/null || true
   send_telegram "❌ Ошибка импорта (код $status):
 $(date '+%d.%m.%Y %H:%M:%S')"
 else
@@ -175,6 +203,7 @@ else
 
   if grep -qiE "(psql: error|Traceback|Exception)" "$LOG_FILE"; then
     echo "[WARN] Обнаружены сообщения об ошибках в логе" >> "$LOG_FILE"
+    sync "$LOG_FILE" 2>/dev/null || true
     send_telegram "⚠️ Ошибка импорта POSTGRES:
 ${TIMESTAMP} (${HOST_ID})"
   else

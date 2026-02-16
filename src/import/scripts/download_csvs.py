@@ -140,7 +140,7 @@ def find_latest_payload(last_existing: Optional[datetime]) -> Optional[Tuple[dat
         print(f"ℹ️  Дата {current:%d.%m.%Y} не доступна, пробуем предыдущий день...", flush=True)
         current -= timedelta(days=1)
 
-    print("⚠️  Не удалось скачать новые CSV.", file=sys.stderr)
+    print("⚠️  Не удалось скачать CSV.", file=sys.stderr)
     print(f"Дата последнего файла: {last_known_str}", file=sys.stderr)
     print(f"Текущая дата: {END_DATE:%d.%m.%Y}", file=sys.stderr)
     if attempts > 0:
