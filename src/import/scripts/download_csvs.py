@@ -198,4 +198,8 @@ if __name__ == "__main__":
     if mode in {"new", "all"}:
         print("ℹ️  Режимы 'new' и 'all' устарели, используем 'latest'.")
 
-    download_latest()
+    try:
+        download_latest()
+    except Exception as e:
+        print(f"[ERROR] Ошибка скачивания CSV: {type(e).__name__}: {e}", file=sys.stderr)
+        sys.exit(1)

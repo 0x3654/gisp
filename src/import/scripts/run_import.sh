@@ -48,74 +48,36 @@ export AUTO_EMBED
 
 mkdir -p "$LOG_DIR" "$FILES_DIR"
 LOG_FILE="$LOG_DIR/run_$(date '+%F_%H-%M').md"
+
+# Загружаем функции отправки Telegram
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/send_telegram.sh" ]]; then
+  # shellcheck disable=SC1090
+  source "$SCRIPT_DIR/send_telegram.sh"
+else
+  echo "[ERROR] Файл send_telegram.sh не найден" >&2
+fi
+
 # ------------------------------------------
 extract_summary() {
   local log_file="$1"
 
   # Проверяем особые случаи
   if grep -q "⚠️  Не удалось скачать CSV\." "$log_file"; then
-    grep -E "⚠️  Не удалось скачать CSV\.|✅ Файл уже загружен в базу|ℹ️  Новых дат для скачивания нет|CSV-файлы в каталоге.*не найдены" "$log_file" | head -5
+    grep -E "⚠️  Не удалось скачать CSV\.|✅ Файл уже загружен в базу|ℹ️  Новых дат для скачивания нет|CSV-файлы в каталоге.*не найдены" "$log_file" | sort | uniq | head -5
     return
   fi
 
   # Проверяем случай, когда CSV-файлы не найдены
   if grep -q "CSV-файлы в каталоге.*не найдены" "$log_file"; then
-    grep -E "CSV-файлы в каталоге.*не найдены|ℹ️  Новых дат для скачивания нет" "$log_file" | head -3
+    grep -E "CSV-файлы в каталоге.*не найдены|ℹ️  Новых дат для скачивания нет" "$log_file" | sort | uniq | head -3
     return
   fi
 
   # Если был импорт - извлекаем статистику
-  grep -E "^\([0-9]{2}\.[0-9]{2}\.[0-9]{4}\) 📦 Последний файл:|🔄 Синхронизация:|Эмбеддинги (обновлены|:)|⏱ Прошедшее время:|✅ Импорт завершён:" "$log_file" | head -10
+  grep -E "^\([0-9]{2}\.[0-9]{2}\.[0-9]{4}\) 📦 Последний файл:|🔄 Синхронизация:|Эмбеддинги (обновлены|:)|⏱ Прошедшее время:|✅ Импорт завершён:" "$log_file" | sort | uniq | head -10
 }
 
-send_telegram() {
-  local message="$1"
-  if [[ -n "${BOT_TOKEN:-}" && -n "${CHAT_ID:-}" ]]; then
-    # Retry logic for getting the log file path (handles race condition)
-    local log_path=""
-    local retries=3
-    local retry_delay=10
-
-    for ((i=1; i<=retries; i++)); do
-      # Ensure log file exists
-      if [[ -f "$LOG_FILE" ]]; then
-        # Sync to ensure file is written to disk
-        sync "$LOG_FILE" 2>/dev/null || true
-
-        log_path=$(realpath "$LOG_FILE")
-        if [[ -n "$log_path" ]] && [[ -f "$log_path" ]]; then
-          break
-        fi
-      fi
-
-      if [[ $i -lt $retries ]]; then
-        echo "[WARN] Лог-файл не найден (попытка $i/$retries), повтор через ${retry_delay}с..." >&2
-        sleep $retry_delay
-      fi
-    done
-
-    if [[ -z "$log_path" ]] || [[ ! -f "$log_path" ]]; then
-      echo "[ERROR] Не удалось получить путь к лог-файлу после $retries попыток: $LOG_FILE" >&2
-      return 1
-    fi
-
-    echo "[INFO] Отправка уведомления в Telegram (файл: $log_path)..." >&2
-    local response=$(curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
-      -F chat_id="${CHAT_ID}" \
-      -F caption="${message}" \
-      -F document=@"$log_path" 2>&1)
-    if echo "$response" | grep -q '"ok":false'; then
-      echo "[ERROR] Ошибка Telegram API: $response" >&2
-      return 1
-    elif [[ -n "$response" ]]; then
-      echo "[INFO] Уведомление отправлено успешно" >&2
-    else
-      echo "[WARN] Пустой ответ от Telegram API" >&2
-    fi
-  else
-    echo "[WARN] Переменные Telegram не заданы" >&2
-  fi
-}
 # ------------------------------------------
 status=0
 
@@ -137,7 +99,7 @@ fi
   if ! python3 /scripts/download_csvs.py latest; then
     cmd_status=$?
     record_failure "$cmd_status"
-    echo "[ERROR] Ошибка скачивания CSV ($cmd_status)"
+    # Ошибка уже выведена Python-скриптом с подробностями
   fi
 
   if ! /scripts/import_all.sh "$FILES_DIR"; then
@@ -190,32 +152,27 @@ echo "=============================================="
 if [[ $status -ne 0 ]]; then
   echo "[ERROR] Скрипт завершился с кодом $status" >> "$LOG_FILE"
   sync "$LOG_FILE" 2>/dev/null || true
-  send_telegram "❌ Ошибка импорта (код $status):
-$(date '+%d.%m.%Y %H:%M:%S')"
+
+  # Отправляем HTML уведомление об ошибке
+  send_telegram_html "❌ Ошибка импорта (код $status)" "$LOG_FILE"
 else
   # Формируем информативное сообщение на основе статистики из лога
-  RAW_HOST=$(hostname -f 2>/dev/null || hostname)
-  if [[ "$RAW_HOST" =~ ^[0-9a-f]{12}$ ]]; then
-    RAW_HOST="registry-node-${RAW_HOST:0:6}"
-  fi
-  HOST_ID="${REGISTRY_NODE_NAME:-$RAW_HOST}"
-  TIMESTAMP=$(date '+%d.%m.%Y %H:%M:%S')
-
   if grep -qiE "(psql: error|Traceback|Exception)" "$LOG_FILE"; then
     echo "[WARN] Обнаружены сообщения об ошибках в логе" >> "$LOG_FILE"
     sync "$LOG_FILE" 2>/dev/null || true
-    send_telegram "⚠️ Ошибка импорта POSTGRES:
-${TIMESTAMP} (${HOST_ID})"
+    # Отправляем HTML уведомление об ошибке POSTGRES
+    send_telegram_html "⚠️ Ошибка импорта POSTGRES" "$LOG_FILE"
   else
     # Извлекаем статистику из лога
     SUMMARY=$(extract_summary "$LOG_FILE")
     if [[ -n "$SUMMARY" ]]; then
-      send_telegram "${SUMMARY}
+      # Отправляем HTML уведомление с успешным импортом
+      send_telegram_html "📊 Импорт завершён успешно
 
-${TIMESTAMP} (${HOST_ID})"
+${SUMMARY}" "$LOG_FILE"
     else
-      send_telegram "✅ Импорт завершён успешно:
-${TIMESTAMP} (${HOST_ID})"
+      # Heartbeat: нет новых файлов - передаём лог для извлечения статистики
+      send_heartbeat "ℹ️ Новых файлов нет" "$LOG_FILE"
     fi
   fi
 fi
