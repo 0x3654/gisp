@@ -62,6 +62,12 @@ fi
 extract_summary() {
   local log_file="$1"
 
+  # Если есть ERROR - не извлекаем "успешную" статистику
+  if grep -q "\[ERROR\]" "$log_file"; then
+    grep -E "\[ERROR\].*" "$log_file" | sort | uniq | head -3
+    return
+  fi
+
   # Проверяем особые случаи
   if grep -q "⚠️  Не удалось скачать CSV\." "$log_file"; then
     grep -E "⚠️  Не удалось скачать CSV\.|✅ Файл уже загружен в базу|ℹ️  Новых дат для скачивания нет|CSV-файлы в каталоге.*не найдены" "$log_file" | sort | uniq | head -5
