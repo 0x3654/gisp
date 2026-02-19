@@ -49,6 +49,9 @@ export AUTO_EMBED
 mkdir -p "$LOG_DIR" "$FILES_DIR"
 LOG_FILE="$LOG_DIR/run_$(date '+%F_%H-%M').md"
 
+# Дублируем вывод в лог-файл и в stdout/stderr для отладки
+exec > >(tee -a "$LOG_FILE") 2>&1
+
 # Загружаем функции отправки Telegram
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$SCRIPT_DIR/send_telegram.sh" ]]; then
@@ -172,10 +175,12 @@ else
     # Извлекаем статистику из лога
     SUMMARY=$(extract_summary "$LOG_FILE")
     if [[ -n "$SUMMARY" ]]; then
+      # Экранируем HTML спецсимволы в summary
+      SUMMARY_ESCAPED=$(echo "$SUMMARY" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')
       # Отправляем HTML уведомление с успешным импортом
       send_telegram_html "📊 Импорт завершён успешно
 
-${SUMMARY}" "$LOG_FILE"
+${SUMMARY_ESCAPED}" "$LOG_FILE"
     else
       # Heartbeat: нет новых файлов - передаём лог для извлечения статистики
       send_heartbeat "ℹ️ Новых файлов нет" "$LOG_FILE"
