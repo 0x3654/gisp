@@ -70,7 +70,7 @@ def load_config() -> Config:
         batch_size=_int("BATCH_SIZE", 200),
         shard_count=_int("SHARD_COUNT", 1),
         shard_index=_int("SHARD_INDEX", 0),
-        semantic_url=os.getenv("SEMANTIC_URL", SEMANTIC_URL_DEFAULT),
+        semantic_url=os.getenv("SEMANTIC_URL") or SEMANTIC_URL_DEFAULT,
     )
 
     if cfg.shard_count <= 0:

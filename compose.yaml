@@ -231,7 +231,6 @@ services:
       SOURCE_FILES: ${SOURCE_FILES:-}
       EMBED_IDS: ${EMBED_IDS:-}
       LIMIT: ${LIMIT:-}
-      SEMANTIC_URL: ${SEMANTIC_URL_OVERRIDE:-}
       SHARD_INDEX: "0"
       SHARD_COUNT: "1"
       BATCH_SIZE: "200"
