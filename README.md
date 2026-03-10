@@ -39,7 +39,7 @@
 Выполните bootstrap-скрипт (скачивает ~3 ГБ образов и ~1 ГБ данных, останавливается при любой ошибке):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/0x3654/gisp/master/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/0x3654/gisp/master/scripts/bootstrap.sh | bash
 ```
 
 Скрипт установит Docker/Compose/Git, клонирует репозиторий, подготовит конфиги, загрузит стартовый дамп через `starter-dump` и запустит контейнеры `postgres_registry`, `api`, `semantic`, `openwebui`. После завершения откройте http://localhost:3333 admin@gisp.ru 123
@@ -119,7 +119,9 @@ curl -fsSL https://raw.githubusercontent.com/0x3654/gisp/master/bootstrap.sh | b
 
 compose.yaml             # Docker Compose конфигурация
 .env.example             # Шаблон конфигурации
-bootstrap.sh             # Скрипт быстрого деплоя
+scripts/
+├── bootstrap.sh         # Скрипт быстрого деплоя
+└── send_telegram.sh     # Хелпер Telegram-уведомлений (используется Ansible)
 ```
 
 **Ключевые особенности архитектуры:**
