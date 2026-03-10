@@ -8,10 +8,10 @@
   SOURCE_FILES=a,b   - обрабатывать только записи с указанными source_file
   EMBED_IDS=1 2 3    - обрабатывать только указанные reestr.id
   LIMIT=N            - ограничить количество записей
-  BATCH_SIZE=200     - размер батча (по умолчанию 200)
+  BATCH_SIZE=200     - размер батча: fetch из БД, запрос к semantic, bulk upsert
   SHARD_COUNT=1      - общее число шардов
   SHARD_INDEX=0      - номер текущего шарда
-  SEMANTIC_URL       - URL сервиса semantic_normalize
+  SEMANTIC_URL       - URL сервиса batch_semantic_normalize
 """
 
 from __future__ import annotations
@@ -20,14 +20,14 @@ import json
 import os
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Iterable, List, Optional, Sequence, Tuple
 
 import psycopg2
 import psycopg2.extras
 import requests
 
-SEMANTIC_URL_DEFAULT = "http://semantic:8010/semantic_normalize"
+SEMANTIC_URL_DEFAULT = "http://semantic:8010/batch_semantic_normalize"
 
 
 @dataclass
@@ -152,41 +152,47 @@ def fetch_rows(
         yield rows
 
 
-def upsert_embedding(
+def fetch_semantic_batch(
+    session: requests.Session,
+    url: str,
+    texts: List[str],
+) -> List[dict]:
+    payload = {"texts": texts, "normalize": False, "apply_synonyms": False}
+    resp = session.post(url, json=payload, timeout=120)
+    resp.raise_for_status()
+    return resp.json()["results"]
+
+
+def bulk_upsert_embeddings(
     cursor: psycopg2.extensions.cursor,
-    reestr_id: int,
-    normalized: str,
-    synonyms: Sequence[str],
-    embedding: Sequence[float],
+    items: List[Tuple[int, str, List[str], List[float]]],
 ) -> None:
-    synonyms_json = psycopg2.extras.Json(
-        list(synonyms),
-        dumps=lambda obj: json.dumps(obj, ensure_ascii=False),
-    )
-    embedding_literal = vector_literal(embedding)
-    cursor.execute(
+    data = [
+        (
+            reestr_id,
+            normalized,
+            psycopg2.extras.Json(
+                list(synonyms),
+                dumps=lambda obj: json.dumps(obj, ensure_ascii=False),
+            ),
+            vector_literal(embedding),
+        )
+        for reestr_id, normalized, synonyms, embedding in items
+    ]
+    psycopg2.extras.execute_values(
+        cursor,
         """
         INSERT INTO registry.semantic_items (reestr_id, normalized_text, synonyms, embedding)
-        VALUES (%s, %s, %s::jsonb, %s::vector)
+        VALUES %s
         ON CONFLICT (reestr_id) DO UPDATE
            SET normalized_text = EXCLUDED.normalized_text,
                synonyms        = EXCLUDED.synonyms,
                embedding       = EXCLUDED.embedding,
                updated_at      = now()
         """,
-        (reestr_id, normalized, synonyms_json, embedding_literal),
+        data,
+        template="(%s, %s, %s::jsonb, %s::vector)",
     )
-
-
-def fetch_semantic(
-    session: requests.Session,
-    url: str,
-    text: str,
-) -> dict:
-    payload = {"text": text, "debug": False, "normalize": False}
-    resp = session.post(url, json=payload, timeout=20)
-    resp.raise_for_status()
-    return resp.json()
 
 
 def main() -> int:
@@ -209,57 +215,55 @@ def main() -> int:
     total_selected = 0
     total_processed = 0
     total_errors = 0
-    row_index = 0
 
     try:
         with conn.cursor() as select_cur:
             select_cur.execute(query, params)
 
             with conn.cursor() as write_cur, requests.Session() as session:
-                batch_start = time.time()
-
                 for rows in fetch_rows(select_cur, cfg.batch_size):
-                    for reestr_id, productname in rows:
-                        row_index += 1
-                        total_selected += 1
-                        original_text = (productname or "").strip()
-                        if not original_text:
-                            continue
-                        if cfg.dry_run:
-                            print(f"[DRY-RUN] id={reestr_id} name={original_text}", flush=True)
-                            continue
-                        savepoint = f"sp_{row_index}"
-                        if not cfg.dry_run:
-                            write_cur.execute(f"SAVEPOINT {savepoint}")
-                        try:
-                            data = fetch_semantic(session, cfg.semantic_url, original_text)
-                            synonyms = data.get("synonyms_applied") or []
-                            embedding = data.get("embedding")
-                            if not isinstance(embedding, list):
-                                raise ValueError("Ответ semantic не содержит embedding")
-                            upsert_embedding(write_cur, reestr_id, original_text, synonyms, embedding)
-                            if not cfg.dry_run:
-                                write_cur.execute(f"RELEASE SAVEPOINT {savepoint}")
-                            total_processed += 1
-                        except Exception as exc:  # noqa: BLE001
-                            total_errors += 1
-                            if not cfg.dry_run:
-                                write_cur.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
-                                write_cur.execute(f"RELEASE SAVEPOINT {savepoint}")
-                            sys.stderr.write(
-                                f"❌ Ошибка обработки id={reestr_id}: {exc}\n"
-                            )
-                            continue
+                    batch_start = time.time()
+                    total_selected += len(rows)
 
-                    if not cfg.dry_run:
+                    valid = [(rid, (name or "").strip()) for rid, name in rows if (name or "").strip()]
+                    if not valid:
+                        continue
+
+                    if cfg.dry_run:
+                        for rid, text in valid:
+                            print(f"[DRY-RUN] id={rid} name={text}", flush=True)
+                        continue
+
+                    try:
+                        results = fetch_semantic_batch(session, cfg.semantic_url, [t for _, t in valid])
+
+                        items: List[Tuple[int, str, List[str], List[float]]] = []
+                        for (rid, text), item in zip(valid, results):
+                            embedding = item.get("embedding")
+                            if not isinstance(embedding, list):
+                                raise ValueError(f"Нет embedding для id={rid}")
+                            items.append((rid, text, item.get("synonyms_applied") or [], embedding))
+
+                        bulk_upsert_embeddings(write_cur, items)
                         conn.commit()
+                        total_processed += len(items)
+
+                    except Exception as exc:  # noqa: BLE001
+                        total_errors += len(valid)
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
+                        sys.stderr.write(
+                            f"❌ Ошибка батча (ids {valid[0][0]}..{valid[-1][0]}): {exc}\n"
+                        )
+                        continue
 
                     elapsed = time.time() - batch_start
                     error_suffix = f" (ошибок: {total_errors})" if total_errors else ""
                     sys.stderr.write(
                         f"Обработано {total_processed} Время обработки: {elapsed:.1f} с.{error_suffix}\n"
                     )
-                    batch_start = time.time()
 
     finally:
         conn.close()

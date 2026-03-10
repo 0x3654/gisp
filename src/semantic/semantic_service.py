@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+import numpy as np
 import psycopg2
 import psycopg2.extras
 import pymorphy3
@@ -25,6 +26,20 @@ _CACHE_CONN = None
 class SemanticRequest(BaseModel):
     text: str
     debug: bool = False
+    normalize: bool = True
+    apply_synonyms: bool = False
+
+
+class BatchNormalizeRequest(BaseModel):
+    texts: List[str]
+    normalize: bool = False
+    apply_synonyms: bool = False
+
+
+class BatchCompareRequest(BaseModel):
+    origin: str
+    candidates: List[str]
+    limit: int = 10
     normalize: bool = True
     apply_synonyms: bool = False
 
@@ -94,6 +109,50 @@ def get_embedding(text: str) -> List[float]:
     model = get_model()
     embedding = model.encode([text], convert_to_numpy=True, show_progress_bar=False)[0]
     return embedding.astype(float).tolist()
+
+
+def cosine_similarity(a: List[float], b: List[float]) -> float:
+    """Calculate cosine similarity between two vectors."""
+    a_arr = np.array(a)
+    b_arr = np.array(b)
+    return float(np.dot(a_arr, b_arr) / (np.linalg.norm(a_arr) * np.linalg.norm(b_arr)))
+
+
+def normalize_text_batch(texts: List[str], morph: pymorphy3.MorphAnalyzer, stemmer: RussianStemmer, apply_synonyms: bool = False, synonyms: Dict[str, List[str]] = None) -> List[str]:
+    """Normalize a batch of texts for embedding."""
+    normalized = []
+    synonyms_dict = synonyms or {}
+
+    for text in texts:
+        text_clean = text.strip().lower()
+        tokens = TOKEN_RE.findall(text_clean)
+
+        norm_tokens = []
+        for token in tokens:
+            if token.isdigit():
+                norm_tokens.append(token)
+            else:
+                parsed = morph.parse(token)
+                if parsed:
+                    norm_tokens.append(parsed[0].normal_form)
+                else:
+                    norm_tokens.append(token)
+
+        # Apply synonyms if requested
+        if apply_synonyms:
+            expansions = []
+            for canonical, variants in synonyms_dict.items():
+                if canonical in text_clean:
+                    expansions.append(canonical)
+                    for variant in variants:
+                        if variant.strip() and variant.strip().lower() not in text_clean:
+                            expansions.append(variant.strip())
+            if expansions:
+                norm_tokens.extend(expansions)
+
+        normalized.append(" ".join(norm_tokens) if norm_tokens else text_clean)
+
+    return normalized
 
 
 def _synonyms_version_hash(synonyms: Dict[str, List[str]]) -> str:
@@ -348,6 +407,136 @@ def create_app() -> FastAPI:
             synonyms_version=synonyms_version,
             synonym_expansions=synonym_expansions,
         )
+
+    @app_instance.post("/batch_semantic_normalize")
+    def batch_semantic_normalize(req: BatchNormalizeRequest) -> Dict[str, object]:
+        if not req.texts:
+            return {"results": []}
+
+        # Normalize all texts and check cache per item
+        results: List[Dict[str, object] | None] = [None] * len(req.texts)
+        to_encode: List[Tuple[int, str, str, List[str], str]] = []  # (idx, orig, embed_input, syns, cache_key)
+
+        for i, text in enumerate(req.texts):
+            text = text.strip()
+            if not text:
+                results[i] = {"embedding": [], "synonyms_applied": []}
+                continue
+
+            text_lower = text.lower()
+            raw_tokens = TOKEN_RE.findall(text_lower)
+            synonym_expansions: List[str] = []
+            synonym_pairs: List[str] = []
+            if req.apply_synonyms and raw_tokens:
+                synonym_expansions, synonym_pairs = collect_synonym_expansions(text_lower, synonyms)
+
+            if req.normalize:
+                norm_tokens = [normalize_token(t, morph) for t in raw_tokens]
+                seen: set = set()
+                dedup = [t for t in norm_tokens if not (t in seen or seen.add(t))]
+                dedup.extend(synonym_expansions)
+                embed_input = " ".join(dedup).strip() or text_lower
+            else:
+                embed_input = (text + " " + " ".join(synonym_expansions)).strip() if synonym_expansions else text
+
+            cache_key = _make_cache_key(
+                original=text,
+                normalized=embed_input,
+                normalize_mode=req.normalize,
+                apply_synonyms=req.apply_synonyms,
+                synonyms_version=synonyms_version,
+            )
+            cached = _cache_lookup(cache_key)
+            if cached:
+                results[i] = {"embedding": cached["embedding"], "synonyms_applied": synonym_pairs}
+            else:
+                to_encode.append((i, text, embed_input, synonym_pairs, cache_key))
+
+        # Batch encode all uncached texts in one model call
+        if to_encode:
+            model = get_model()
+            embeddings = model.encode(
+                [item[2] for item in to_encode],
+                convert_to_numpy=True,
+                show_progress_bar=False,
+            )
+            for (i, orig, embed_input, synonym_pairs, cache_key), emb in zip(to_encode, embeddings):
+                embedding = emb.astype(float).tolist()
+                results[i] = {"embedding": embedding, "synonyms_applied": synonym_pairs}
+                _cache_store(
+                    cache_key,
+                    {"embedding": embedding, "normalized": embed_input, "synonyms_applied": synonym_pairs},
+                    original_text=orig,
+                )
+
+        return {"results": results}
+
+    @app_instance.post("/batch_compare")
+    def batch_compare(req: BatchCompareRequest) -> Dict[str, object]:
+        """Compare origin text against multiple candidates, return sorted by similarity."""
+        if not req.origin or not req.candidates:
+            raise HTTPException(status_code=400, detail="Origin and candidates are required.")
+
+        model = get_model()
+
+        # Normalize all texts
+        morph = pymorphy3.MorphAnalyzer()
+        stemmer = RussianStemmer()
+
+        origin_norm = req.origin.strip()
+        candidates_norm = [c.strip() for c in req.candidates if c.strip()]
+
+        if req.normalize:
+            # Normalize origin
+            origin_tokens = TOKEN_RE.findall(origin_norm.lower())
+            origin_norm_tokens = []
+            for token in origin_tokens:
+                if token.isdigit():
+                    origin_norm_tokens.append(token)
+                else:
+                    parsed = morph.parse(token)
+                    origin_norm_tokens.append(parsed[0].normal_form if parsed else token)
+
+            # Apply synonyms to origin if needed
+            if req.apply_synonyms:
+                for canonical, variants in synonyms.items():
+                    if canonical in origin_norm.lower():
+                        origin_norm_tokens.append(canonical)
+                        origin_norm_tokens.extend([v.strip() for v in variants if v.strip()])
+
+            origin_text = " ".join(origin_norm_tokens) if origin_norm_tokens else origin_norm
+        else:
+            origin_text = origin_norm
+
+        # Get origin embedding
+        origin_emb = model.encode([origin_text], convert_to_numpy=True, show_progress_bar=False)[0]
+
+        # Normalize candidates and get embeddings in batch
+        if req.normalize:
+            candidates_normalized = normalize_text_batch(candidates_norm, morph, stemmer, req.apply_synonyms, synonyms)
+        else:
+            candidates_normalized = candidates_norm
+
+        # Batch encode candidates
+        candidates_emb = model.encode(candidates_normalized, convert_to_numpy=True, show_progress_bar=False)
+
+        # Calculate similarities
+        results = []
+        for i, (original_text, emb) in enumerate(zip(candidates_norm, candidates_emb)):
+            similarity = cosine_similarity(origin_emb, emb)
+            results.append([original_text, float(similarity)])
+
+        # Sort by similarity (descending)
+        results.sort(key=lambda x: x[1], reverse=True)
+
+        # Apply limit
+        limited_results = results[:req.limit] if req.limit > 0 else results
+
+        return {
+            "results": limited_results,
+            "count": len(limited_results),
+            "total": len(results)
+        }
 
     return app_instance
 
