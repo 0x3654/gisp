@@ -121,7 +121,7 @@ ARG HF_ENDPOINT="https://huggingface.co"
 
 # Metadata labels
 LABEL maintainer="0x3654"
-LABEL service="gisp_semantic"
+LABEL service="gisp_semantic-pytorch"
 LABEL version=$VERSION
 LABEL runtime="pytorch"
 LABEL torch.version="2.3.1"

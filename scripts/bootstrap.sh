@@ -69,7 +69,7 @@ cd "$TARGET_DIR"
 # ── Configuration ──────────────────────────────────────────────────────────────
 info "Preparing configuration files"
 if [[ ! -f .env ]]; then
-  perl -pe 's/{{ .*? \| default\(.*?([0-9a-zA-Z:_\/.-]+).*?\) }}/\1/g' .env.example > .env
+  perl -pe "s/\{\{[^|}]+\|\s*default\('([^']*)'\)\s*\}\}/\$1/g" .env.example > .env
   info "Created .env from .env.example — review and adjust secrets before production use"
 fi
 copy_if_missing "services/semantic/synonyms.example.json" "services/semantic/synonyms.json"

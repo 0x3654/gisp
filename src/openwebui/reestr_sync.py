@@ -1,22 +1,28 @@
 """
-title: Reestr Search Pipe (Fallback on Empty Rows)
-author: m.kabakov
-description: Исправлены fallback-блоки: повторный поиск по code и TNVED выполняется только если реально нет найденных строк; сокращение TNVED 10→8→6→4; debug_info отображает все попытки.
-version: 1.7.32
+title: Reestr Search Pipe
+author: 0x3654
+description: OpenWebUI pipe для поиска по реестру ГИСП. Рефакторинг: выделены _prepare_param_value и _build_params_to_send, удалён мёртвый код, datetime перенесён на уровень модуля. Скрипт также является инструментом синхронизации функции в webui.db.
+version: 1.8.0
 """
 
 from __future__ import annotations
 
-import re
-import time
-import json
+import argparse
 import ast
+import json
 import math
 import os
+import re
+import shutil
+import sqlite3
+import sys
+import time
 import requests
+from dataclasses import dataclass
 from datetime import datetime
 from html import unescape
-from typing import Dict, Any, List, Tuple, Set
+from pathlib import Path
+from typing import Any, Dict, List, Set, Tuple
 
 BASE_URL = f"http://api:{os.getenv('API_PORT', '8000')}/reestr"
 SEMANTIC_URL = f"http://semantic:{os.getenv('SEMANTIC_PORT', '8010')}/semantic_normalize"
@@ -45,6 +51,28 @@ FIELD_RENAME = {
     "token_matches": "Совпавшие токены",
 }
 HIDDEN_COLUMNS = {"id", "source_file"}
+
+FIELD_RENAME_EN = {
+    "Наименование": "product_name",
+    "ТН ВЭД": "tnved",
+    "ОКПД2": "okpd2",
+    "Регномер": "reg_number",
+    "Срок действия": "valid_until",
+    "Регномер старый": "reg_number_old",
+    "Дата документа": "doc_date",
+    "Производитель": "manufacturer",
+    "ИНН": "inn",
+    "Семантическая дистанция": "distance",
+    "Совпавшие токены": "token_matches",
+}
+
+QUANTITY_MARKERS: Set[str] = {
+    "шт", "штук", "штуки", "уп", "упак", "упаковка", "упаковке", "упаковки",
+    "упаковок", "пакет", "пакетов", "пачка", "пачек", "комплект", "комплекта",
+    "комплектов", "компл", "набор", "наборов", "лист", "листов", "пара", "пары",
+    "пар", "бутылка", "бутылок", "флакон", "флаконов", "рулон", "рулонов",
+    "коробка", "коробок", "мл", "л", "кг", "г", "гр", "мм", "см", "м",
+}
 
 OKPD2_RE = re.compile(r"^\d{2}\.\d{2}(?:\.\d{2})*(?:\.[0-9]{3})?$")
 TNVED_EXPL_RE = re.compile(r"^(0[1-9]|[1-8]\d|9[0-7])(\d{2}|\d{4}|\d{6}|\d{8})$")
@@ -89,28 +117,6 @@ class Pipe:
         if not pattern.search(text):
             return None
         return pattern.sub(variant, text, count=1)
-
-    def normalize_terms(self, text: str) -> str:
-        """
-        Нормализует текст для поиска:
-        - Удаляет русские окончания и числа
-        - Латиница и бренды приводятся к нижнему регистру
-        - Все термины объединяются через '^' в порядке появления в тексте
-        """
-        from rutermextract import TermExtractor
-
-        term_extractor = TermExtractor()
-        terms = [t.normalized for t in term_extractor(text)]
-        normalized_terms = []
-        seen = set()
-        for t in terms:
-            t_lower = t.lower()
-            if t_lower not in seen:
-                normalized_terms.append(t_lower)
-                seen.add(t_lower)
-        # объединяем термины через '^' без сортировки
-        joined = "^".join(normalized_terms)
-        return joined
 
     def _semantic_normalize_request(
         self, text: str, debug_mode: bool
@@ -217,6 +223,7 @@ class Pipe:
                 f"| {variant} | {normalized or '—'} | {synonyms or '—'} | {distance_str} | {similarity_str} |"
             )
         return header + "\n" + "\n".join(lines)
+
     def semantic_remote(self, text: str, debug: bool | None = None) -> str:
         """
         Делает POST-запрос к semantic-сервису и форматирует ответ.
@@ -275,32 +282,32 @@ class Pipe:
         result_a, payload_a, error_a = self._semantic_normalize_request(text_a, debug_mode)
         if error_a:
             error_msg = f"❌ Ошибка при обработке первой строки:\n{error_a}"
-            return error_msg if response_format == "markdown" else {"error": error_a, "error_code": "first_text_error"}
+            return error_msg if response_format == "markdown" else json.dumps({"error": error_a, "error_code": "first_text_error"}, ensure_ascii=False)
         if not isinstance(result_a, dict):
             error_msg = "❌ Неожиданный ответ semantic по первой строке."
-            return error_msg if response_format == "markdown" else {"error": "Unexpected semantic response for first text", "error_code": "first_text_invalid_response"}
+            return error_msg if response_format == "markdown" else json.dumps({"error": "Unexpected semantic response for first text", "error_code": "first_text_invalid_response"}, ensure_ascii=False)
 
         result_b, payload_b, error_b = self._semantic_normalize_request(text_b, debug_mode)
         if error_b:
             error_msg = f"❌ Ошибка при обработке второй строки:\n{error_b}"
-            return error_msg if response_format == "markdown" else {"error": error_b, "error_code": "second_text_error"}
+            return error_msg if response_format == "markdown" else json.dumps({"error": error_b, "error_code": "second_text_error"}, ensure_ascii=False)
         if not isinstance(result_b, dict):
             error_msg = "❌ Неожиданный ответ semantic по второй строке."
-            return error_msg if response_format == "markdown" else {"error": "Unexpected semantic response for second text", "error_code": "second_text_invalid_response"}
+            return error_msg if response_format == "markdown" else json.dumps({"error": "Unexpected semantic response for second text", "error_code": "second_text_invalid_response"}, ensure_ascii=False)
 
         vector_a = self._embedding_vector(result_a.get("embedding"))
         if not vector_a:
             error_msg = "❌ Сервис semantic вернул пустой embedding для первой строки."
-            return error_msg if response_format == "markdown" else {"error": "Empty embedding for first text", "error_code": "first_text_no_embedding"}
+            return error_msg if response_format == "markdown" else json.dumps({"error": "Empty embedding for first text", "error_code": "first_text_no_embedding"}, ensure_ascii=False)
         vector_b = self._embedding_vector(result_b.get("embedding"))
         if not vector_b:
             error_msg = "❌ Сервис semantic вернул пустой embedding для второй строки."
-            return error_msg if response_format == "markdown" else {"error": "Empty embedding for second text", "error_code": "second_text_no_embedding"}
+            return error_msg if response_format == "markdown" else json.dumps({"error": "Empty embedding for second text", "error_code": "second_text_no_embedding"}, ensure_ascii=False)
 
         similarity = self._cosine_similarity(vector_a, vector_b)
         if similarity is None:
             error_msg = "❌ Не удалось вычислить косинусную дистанцию между строками."
-            return error_msg if response_format == "markdown" else {"error": "Failed to compute cosine similarity", "error_code": "similarity_computation_failed"}
+            return error_msg if response_format == "markdown" else json.dumps({"error": "Failed to compute cosine similarity", "error_code": "similarity_computation_failed"}, ensure_ascii=False)
         distance = 1 - similarity
 
         # JSON response - только расстояния без лишнего текста
@@ -390,14 +397,14 @@ class Pipe:
             resp = requests.post(SEMANTIC_BATCH_URL, json=payload, timeout=30)
             if resp.status_code != 200:
                 error_msg = f"❌ Ошибка batch_compare: HTTP {resp.status_code}"
-                return error_msg if response_format == "markdown" else {"error": f"HTTP {resp.status_code}", "error_code": "batch_http_error"}
+                return error_msg if response_format == "markdown" else json.dumps({"error": f"HTTP {resp.status_code}", "error_code": "batch_http_error"}, ensure_ascii=False)
 
             result = resp.json()
             results = result.get("results", [])
 
             if not results:
                 error_msg = "❌ Нет результатов сравнения"
-                return error_msg if response_format == "markdown" else {"error": "No results", "error_code": "no_results"}
+                return error_msg if response_format == "markdown" else json.dumps({"error": "No results", "error_code": "no_results"}, ensure_ascii=False)
 
             # JSON response - возвращаем как есть
             if response_format == "json":
@@ -422,13 +429,13 @@ class Pipe:
 
         except requests.Timeout:
             error_msg = "❌ Timeout при обращении к batch_compare"
-            return error_msg if response_format == "markdown" else {"error": "Timeout", "error_code": "timeout"}
+            return error_msg if response_format == "markdown" else json.dumps({"error": "Timeout", "error_code": "timeout"}, ensure_ascii=False)
         except requests.ConnectionError:
             error_msg = "❌ Не удалось подключиться к batch_compare"
-            return error_msg if response_format == "markdown" else {"error": "Connection error", "error_code": "connection_error"}
+            return error_msg if response_format == "markdown" else json.dumps({"error": "Connection error", "error_code": "connection_error"}, ensure_ascii=False)
         except Exception as exc:
             error_msg = f"❌ Ошибка: {exc}"
-            return error_msg if response_format == "markdown" else {"error": str(exc), "error_code": "exception"}
+            return error_msg if response_format == "markdown" else json.dumps({"error": str(exc), "error_code": "exception"}, ensure_ascii=False)
 
     def _call_semantic_reestr(
         self,
@@ -822,48 +829,6 @@ class Pipe:
         # 3. Классификация числовых кодов по длине и назначению
         inn_candidates = []
         tnved_candidates = []
-        quantity_markers: Set[str] = {
-            "шт",
-            "штук",
-            "штуки",
-            "уп",
-            "упак",
-            "упаковка",
-            "упаковке",
-            "упаковки",
-            "упаковок",
-            "пакет",
-            "пакетов",
-            "пачка",
-            "пачек",
-            "комплект",
-            "комплекта",
-            "комплектов",
-            "компл",
-            "набор",
-            "наборов",
-            "лист",
-            "листов",
-            "пара",
-            "пары",
-            "пар",
-            "бутылка",
-            "бутылок",
-            "флакон",
-            "флаконов",
-            "рулон",
-            "рулонов",
-            "коробка",
-            "коробок",
-            "мл",
-            "л",
-            "кг",
-            "г",
-            "гр",
-            "мм",
-            "см",
-            "м",
-        }
 
         def _normalize_token(token: str) -> str:
             return re.sub(r"^[^\w]+|[^\w]+$", "", token, flags=re.UNICODE).lower()
@@ -881,7 +846,7 @@ class Pipe:
                     if not word_match:
                         continue
                     token = _normalize_token(word_match.group(1))
-                    if token in quantity_markers:
+                    if token in QUANTITY_MARKERS:
                         return True
             return False
 
@@ -1064,21 +1029,6 @@ class Pipe:
         if not isinstance(total, int) or total < 0:
             total = len(rows)
         shown = len(rows_limited)
-
-        # Словарь технических ключей на английском для интеграции (альернатива русским)
-        FIELD_RENAME_EN = {
-            "Наименование": "product_name",
-            "ТН ВЭД": "tnved",
-            "ОКПД2": "okpd2",
-            "Регномер": "reg_number",
-            "Срок действия": "valid_until",
-            "Регномер старый": "reg_number_old",
-            "Дата документа": "doc_date",
-            "Производитель": "manufacturer",
-            "ИНН": "inn",
-            "Семантическая дистанция": "distance",
-            "Совпавшие токены": "token_matches",
-        }
 
         # Формируем результаты с техническими ключами на английском
         results = []
@@ -1381,7 +1331,7 @@ class Pipe:
                 summary_debug=semantic_summary,
                 response_format=response_format_type,
             )
-            if semantic_full_debug:
+            if semantic_full_debug and response_format_type != "json":
                 debug_details = self.semantic_remote(semantic_clean, debug=True)
                 if debug_details:
                     result = debug_details + "\n\n" + result
@@ -1723,7 +1673,6 @@ class Pipe:
                 )
 
         try:
-            print(f"[DEBUG] API request to: {BASE_URL.split('/')[-1]}")
             resp = requests.get(BASE_URL, params=params_to_send, timeout=TIMEOUT)
             last_url = getattr(resp, "url", "")
             resp.raise_for_status()
@@ -1928,23 +1877,9 @@ class Pipe:
                 )
         return body_text
 
-# ==========================================
-# ==========================================
-
-import argparse
-import json
-import re
-import shutil
-import sqlite3
-import sys
-import time
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Dict
-
 DEFAULT_FUNCTION_ID = "reestr"
 DEFAULT_DB_PATH = Path("services/openwebui/data/webui.db")
-DEFAULT_SCRIPT_PATH = Path("reestr_openwebui.py")
+DEFAULT_SCRIPT_PATH = Path("reestr_sync.py")
 CACHE_ROOT = Path("services/openwebui/data/cache/functions")
 
 
