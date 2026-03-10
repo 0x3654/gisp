@@ -166,6 +166,9 @@ COPY --from=model-downloader --chown=appuser:appuser /models /app/model
 # Copy application code (with ownership)
 COPY --chown=appuser:appuser ./src/semantic /app
 
+# Copy embeddings-worker script
+COPY --chown=appuser:appuser ./src/import/scripts/update_embeddings.py /app/update_embeddings.py
+
 # Add non-root user
 RUN groupadd -g 10001 appuser && useradd -u 10001 -g appuser appuser
 
