@@ -407,9 +407,10 @@ docker compose --profile tasks run --rm import
 >   - Если найден только `INN` или только `TNVED` — создаётся `code` с удалением исходных `inn`/`tnved`
 >   - Итоговые параметры сохраняются в `params`, добавляются `max_rows` и флаг `debug`
 
->6. **Подготовка запроса к API**
->   - В `params_to_send` помещаются только найденные параметры: `code`, `inn`, `tnved`, `okpd2`, `productname`, `regnumber`
->   - Строки и списки объединяются через `|` для передачи нескольких значений
+>6. **Подготовка запроса к API** ([`_build_params_to_send`](#_build_params_to_sendparams))
+>   - В `params_to_send` помещаются только найденные параметры: `code`, `inn`, `tnved`, `okpd2`, `productname`, `nameoforg`, `regnumber`
+>   - Строки и списки объединяются через `|` ([`_prepare_param_value`](#_prepare_param_valuekey-val)) для передачи нескольких значений
+>   - Если есть `regnumber` — все остальные параметры отбрасываются (точный поиск по регномеру)
 
 >7. **Отправка запроса и fallback**
 >   - Первый запрос к API отправляется с текущими `params_to_send
@@ -437,7 +438,7 @@ docker compose --profile tasks run --rm import
 >   - Очистка лишних символов и переносов из текста
 </details>
 
-# III. Chat Pipe (`reestr_openwebui.py`)
+# III. Chat Pipe (`reestr_sync.py`)
 
 <details>
 <summary><b>Описание:</b></summary>
@@ -540,9 +541,16 @@ docker compose --profile tasks run --rm import
 
 >- Удаляет строки управления `debug` и `max_rows` из текста
 
-#### `split_terms(value)`
+#### `_prepare_param_value(key, val) → str`
 
-> - Хелпер из API: делит значение `productname` по разделителям `$` (логическое И) и `^` (логическое ИЛИ), удаляя лишние пробелы
+> - Статический метод: нормализует значение параметра перед отправкой в API
+> - `str` → возвращает как есть; `list` → объединяет через `|`; остальное → `str(val)`
+
+#### `_build_params_to_send(params) → dict`
+
+> - Строит словарь параметров для запроса к API из распознанного `params`
+> - Если есть `regnumber` — только он; иначе — `code`, `inn`, `tnved`, `okpd2`, `productname`, `nameoforg`
+> - Значения нормализуются через `_prepare_param_value`
 
 #### `_validate_inn(inn_str)`
 
