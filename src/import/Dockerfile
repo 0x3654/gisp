@@ -26,7 +26,7 @@ FROM python:3.12-alpine
 ARG VERSION=1.0
 
 # Metadata labels
-LABEL maintainer="gisp-team"
+LABEL maintainer="0x3654"
 LABEL service="import"
 LABEL version=$VERSION
 LABEL org.opencontainers.image.source="https://github.com/0x3654/gisp"

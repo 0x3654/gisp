@@ -113,7 +113,7 @@ ARG HF_MODEL_ID="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 ARG HF_ENDPOINT="https://huggingface.co"
 
 # Metadata labels
-LABEL maintainer="gisp-team"
+LABEL maintainer="0x3654"
 LABEL service="semantic"
 LABEL version=$VERSION
 LABEL runtime="onnxruntime"
