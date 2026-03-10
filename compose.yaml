@@ -134,7 +134,9 @@ services:
       - ./files:/files
       - ${DOWNLOADER_SSH_KEY:-}:/ssh_key:ro
     # Важно: SSH ключ всегда монтируется в /ssh_key внутри контейнера
-    network_mode: host
+    # external network (не internal: true) — downloader нужен интернет, БД не нужна
+    networks:
+      - external
     restart: "no"
   openwebui-sync:
     image: docker.io/0x3654/gisp-openwebui-sync:latest

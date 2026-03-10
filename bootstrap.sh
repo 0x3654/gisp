@@ -4,15 +4,16 @@ set -euo pipefail
 
 REPO_URL="https://github.com/0x3654/gisp.git"
 TARGET_DIR="${GISP_TARGET_DIR:-gisp}"
-SERVICES=("postgres_registry" "api" "import" "semantic" "openwebui")
+# Long-running services only — task containers (import, downloader, embeddings-worker)
+# are managed by Ansible/Semaphore and must NOT be started here.
+SERVICES=("postgres_registry" "api" "semantic" "openwebui")
 
 info() { printf "==> %s\n" "$*"; }
+warn() { printf "⚠️  %s\n" "$*" >&2; }
+die()  { printf "❌ %s\n" "$*" >&2; exit 1; }
 
 require_command() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    printf "❌ Command '%s' is required but not found. Aborting.\n" "$1" >&2
-    exit 1
-  fi
+  command -v "$1" >/dev/null 2>&1 || die "Command '$1' is required but not found."
 }
 
 copy_if_missing() {
@@ -21,90 +22,98 @@ copy_if_missing() {
     info "Skipping $dst (already exists)"
   else
     cp "$src" "$dst"
+    info "Created $dst"
   fi
 }
 
-info "Checking prerequisites (apt, sudo)"
+# ── Prerequisites ──────────────────────────────────────────────────────────────
+info "Checking prerequisites"
 require_command sudo
-if ! command -v apt >/dev/null 2>&1 && ! command -v apt-get >/dev/null 2>&1; then
-  printf "❌ This bootstrap script is intended for Debian/Ubuntu with apt.\n" >&2
-  exit 1
-fi
+command -v apt-get >/dev/null 2>&1 || die "This bootstrap script requires a Debian/Ubuntu system with apt."
 
 needs_install=false
-for cmd in docker "docker compose" git; do
-  if ! command -v ${cmd%% *} >/dev/null 2>&1; then
-    needs_install=true
-    break
-  fi
+for cmd in docker git; do
+  command -v "$cmd" >/dev/null 2>&1 || { needs_install=true; break; }
 done
+# Check compose plugin separately — 'docker' may exist without the plugin
+docker compose version >/dev/null 2>&1 || needs_install=true
 
-if "$needs_install"; then
-  info "Installing Docker, Compose plugin and Git (sudo password may be required)"
-  sudo apt update
-  sudo apt install -y docker.io docker-compose-plugin git
+if $needs_install; then
+  info "Installing Docker (Compose plugin) and Git — sudo password may be required"
+  sudo apt-get update -qq
+  sudo apt-get install -y docker.io docker-compose-plugin git
   sudo usermod -aG docker "$USER" || true
 else
-  info "Docker, Compose and Git already installed. Skipping apt install."
+  info "Docker, Compose plugin and Git already installed — skipping."
 fi
 
+# ── Clone ──────────────────────────────────────────────────────────────────────
 if [[ -d "$TARGET_DIR/.git" ]]; then
-  info "Directory '$TARGET_DIR' already exists. Reusing existing clone."
+  info "Directory '$TARGET_DIR' already exists — reusing existing clone."
 else
-  info "Cloning repository (sparse checkout - production files only)"
+  info "Cloning repository (sparse, depth=1 — production files only)"
   git clone --depth 1 --filter=blob:none --sparse "$REPO_URL" "$TARGET_DIR"
-  cd "$TARGET_DIR"
-  git sparse-checkout set compose.yaml .env.example services/semantic/ services/openwebui/
-  cd - >/dev/null
+  # services/init  — postgres init SQL (schemas, extensions); required for first-run DB init
+  # services/semantic — synonyms config volume-mounted into the semantic container
+  # services/openwebui — OpenWebUI persistent data
+  git -C "$TARGET_DIR" sparse-checkout set \
+    compose.yaml \
+    .env.example \
+    services/init \
+    services/semantic \
+    services/openwebui
 fi
 
 cd "$TARGET_DIR"
 
+# ── Configuration ──────────────────────────────────────────────────────────────
 info "Preparing configuration files"
 if [[ ! -f .env ]]; then
   perl -pe 's/{{ .*? \| default\(.*?([0-9a-zA-Z:_\/.-]+).*?\) }}/\1/g' .env.example > .env
+  info "Created .env from .env.example — review and adjust secrets before production use"
 fi
 copy_if_missing "services/semantic/synonyms.example.json" "services/semantic/synonyms.json"
 mkdir -p services/openwebui/data
 copy_if_missing "services/openwebui/webui.db.example" "services/openwebui/data/webui.db"
 
-# Auto-select optimal semantic image based on host architecture
+# ── Architecture ───────────────────────────────────────────────────────────────
 ARCH=$(uname -m)
-info "Detected architecture: $ARCH"
-# ONNX is used by default in compose.yaml for both architectures
-if [[ "$ARCH" == "aarch64" ]]; then
-  info "Using ARM64 image with ONNX Runtime backend (optimized for Apple Silicon/ARM)"
-else
-  info "Using AMD64 image with ONNX Runtime backend (optimized for Intel/AMD)"
-fi
+info "Detected architecture: $ARCH — both AMD64 and ARM64 use the ONNX Runtime image"
 
-info "Restoring starter dump via docker compose (profile starter)"
-sudo env COMPOSE_PROFILES=starter COMPOSE_INTERACTIVE_NO_CLI=1 docker compose run -T --rm starter-dump </dev/null
+# ── Starter DB dump ────────────────────────────────────────────────────────────
+info "Restoring starter dump (profile: starter)"
+sudo env COMPOSE_PROFILES=starter COMPOSE_INTERACTIVE_NO_CLI=1 \
+  docker compose run -T --rm starter-dump </dev/null
 
-info "Cleaning up starter image to free space"
-mapfile -t starter_images < <(sudo docker images --filter "label=org.opencontainers.image.title=gisp-starter" --format '{{.ID}} {{.Repository}}:{{.Tag}}')
-
+info "Cleaning up starter image to free disk space"
+mapfile -t starter_images < <(
+  sudo docker images \
+    --filter "label=org.opencontainers.image.title=gisp-starter" \
+    --format '{{.ID}} {{.Repository}}:{{.Tag}}'
+)
 if ((${#starter_images[@]} == 0)); then
-  info "No gisp-starter images found. Skipping cleanup."
+  info "No gisp-starter images found — skipping cleanup."
 else
-  starter_image_ids=()
-  starter_image_refs=()
+  ids=()
+  refs=()
   for entry in "${starter_images[@]}"; do
-    starter_image_ids+=("${entry%% *}")
-    starter_image_refs+=("${entry#* }")
+    ids+=("${entry%% *}")
+    refs+=("${entry#* }")
   done
-  info "Removing starter image(s): ${starter_image_refs[*]}"
-  if ! sudo docker rmi "${starter_image_ids[@]}" >/dev/null 2>&1; then
-    printf "⚠️ Failed to remove gisp-starter images (they might be in use).\n" >&2
-  fi
+  info "Removing starter image(s): ${refs[*]}"
+  sudo docker rmi "${ids[@]}" >/dev/null 2>&1 \
+    || warn "Failed to remove gisp-starter images (may be in use)."
 fi
 
-info "Starting services: ${SERVICES[*]}"
+# ── Start services ─────────────────────────────────────────────────────────────
+info "Pulling and starting services: ${SERVICES[*]}"
 sudo docker compose pull "${SERVICES[@]}"
 sudo docker compose up -d "${SERVICES[@]}"
 
 cat <<'EOF'
+
 🎉 GISP stack is up and running.
-- Open http://localhost:3333 for OpenWebUI.
-login: admin@gisp.ru pass: 123
+   OpenWebUI  →  http://localhost:3333
+   login:  admin@gisp.ru
+   pass:   123
 EOF
