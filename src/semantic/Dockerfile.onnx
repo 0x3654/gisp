@@ -114,7 +114,7 @@ ARG HF_ENDPOINT="https://huggingface.co"
 
 # Metadata labels
 LABEL maintainer="0x3654"
-LABEL service="semantic"
+LABEL service="gisp_semantic"
 LABEL version=$VERSION
 LABEL runtime="onnxruntime"
 LABEL runtime.version="1.23.2"
