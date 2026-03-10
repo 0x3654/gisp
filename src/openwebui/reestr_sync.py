@@ -14,6 +14,7 @@ import ast
 import math
 import os
 import requests
+from datetime import datetime
 from html import unescape
 from typing import Dict, Any, List, Tuple, Set
 
@@ -769,16 +770,6 @@ class Pipe:
         # Возвращаем очищенный текст для формирования productname
         return params, t.strip()
 
-    # ⚠️ Старый код, оставлено временно для возможной совместимости
-    # def _has_org_context(self, tokens: List[str]) -> bool:
-    #     # return any(tok.strip(".,!?()[]{}\"'-").lower() in ORG_MARKERS for tok in tokens)
-    #     pass
-
-    # ⚠️ Старый код, оставлено временно для возможной совместимости
-    # def _has_product_context(self, text: str) -> bool:
-    #     # return bool(re.search(r"[A-Za-zА-Яа-яЁё]", text) or "+" in text)
-    #     pass
-
     def _detect_data_type(self, text: str) -> Dict[str, Any]:
         max_rows = self._extract_max_rows(text)
         if self.rx_debug_off.search(text):
@@ -1036,8 +1027,6 @@ class Pipe:
                 if c in {"docdate", "docvalidtill"} and val:
                     # преобразуем в формат DD.MM.YYYY
                     try:
-                        from datetime import datetime
-
                         dt = None
                         if isinstance(val, str):
                             for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y"):
@@ -1103,7 +1092,6 @@ class Pipe:
                 # Форматируем даты в ISO формат для лучшей совместимости
                 if c in {"docdate", "docvalidtill"} and val:
                     try:
-                        from datetime import datetime
                         dt = None
                         if isinstance(val, str):
                             for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y"):
@@ -1194,12 +1182,6 @@ class Pipe:
         rows = [r for r in rows if isinstance(r, dict)]
         return rows, meta
 
-    # ⚠️ Старый код, оставлено временно для возможной совместимости
-    # def split_terms(self, value: str) -> list[str]:
-    #     # parts = [p.strip() for p in value.split("+") if p.strip()]
-    #     # return parts
-    #     pass
-
     def _detect_response_format(self, body: dict) -> str:
         """Определяет запрошенный формат ответа: json или markdown (по умолчанию)."""
         response_format = body.get("response_format")
@@ -1210,6 +1192,24 @@ class Pipe:
         elif isinstance(response_format, str) and response_format.lower() == "json":
             return "json"
         return "markdown"
+
+    @staticmethod
+    def _prepare_param_value(key: str, val: Any) -> str:
+        if isinstance(val, str):
+            return val
+        if isinstance(val, list):
+            return "|".join(val)
+        return str(val)
+
+    def _build_params_to_send(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        result: Dict[str, Any] = {}
+        if "regnumber" in params:
+            result["regnumber"] = params["regnumber"]
+        else:
+            for key in ("code", "inn", "tnved", "okpd2", "productname", "nameoforg"):
+                if key in params:
+                    result[key] = self._prepare_param_value(key, params[key])
+        return result
 
     async def pipe(self, body: dict, __user__=None, __request__=None):
         # Определяем формат ответа (JSON или markdown)
@@ -1399,34 +1399,6 @@ class Pipe:
         text_clean = self.clean_control_params(text)
         text_clean = self._strip_debug_lines(text_clean)
         params = self._detect_data_type(text_clean)
-        def prepare_param_value(key, val):
-            if isinstance(val, str):
-                return val
-            if isinstance(val, list):
-                return "|".join(val)
-            return str(val)
-        params_to_send = {}
-        if params:
-            if "regnumber" in params:
-                params_to_send["regnumber"] = params["regnumber"]
-            else:
-                if "code" in params:
-                    params_to_send["code"] = prepare_param_value("code", params["code"])
-                if "inn" in params:
-                    params_to_send["inn"] = prepare_param_value("inn", params["inn"])
-                if "tnved" in params:
-                    params_to_send["tnved"] = prepare_param_value("tnved", params["tnved"])
-                if "okpd2" in params:
-                    params_to_send["okpd2"] = prepare_param_value("okpd2", params["okpd2"])
-                if "productname" in params:
-                    params_to_send["productname"] = prepare_param_value(
-                        "productname", params["productname"]
-                    )
-                if "nameoforg" in params:
-                    params_to_send["nameoforg"] = prepare_param_value(
-                        "nameoforg", params["nameoforg"]
-                    )
-
         if not params:
             return (
                 "Не удалось определить параметры поиска. Примеры:\n"
@@ -1434,34 +1406,14 @@ class Pipe:
             )
         if "regnumber" in params:
             params["regnumber"] = self._normalize_regnumber(params["regnumber"])
-        # Переопределяем params_to_send после нормализации regnumber (для обычного режима)
-        params_to_send = {}
-        if "regnumber" in params:
-            params_to_send["regnumber"] = params["regnumber"]
-        else:
-            if "code" in params:
-                params_to_send["code"] = prepare_param_value("code", params["code"])
-            if "inn" in params:
-                params_to_send["inn"] = prepare_param_value("inn", params["inn"])
-            if "tnved" in params:
-                params_to_send["tnved"] = prepare_param_value("tnved", params["tnved"])
-            if "okpd2" in params:
-                params_to_send["okpd2"] = prepare_param_value("okpd2", params["okpd2"])
-            if "productname" in params:
-                params_to_send["productname"] = prepare_param_value(
-                    "productname", params["productname"]
-                )
-            if "nameoforg" in params:
-                params_to_send["nameoforg"] = prepare_param_value(
-                    "nameoforg", params["nameoforg"]
-                )
+        params_to_send = self._build_params_to_send(params)
 
         fallback_debug: List[str] = []
         relaxed_outputs: List[Dict[str, Any]] = []
 
         product_query_value = None
         if "productname" in params:
-            product_query_value = prepare_param_value("productname", params["productname"])
+            product_query_value = self._prepare_param_value("productname", params["productname"])
 
         search_text = (product_query_value or text_clean).strip()
         if search_text:
