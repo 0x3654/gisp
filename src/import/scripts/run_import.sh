@@ -13,9 +13,8 @@ fi
 : "${FILES_DIR:=/files}"
 : "${LOG_DIR:=/var/log/registry}"
 : "${MAX_LOG_FILES:=7}"
-: "${MAX_MAINTENANCE_LOG_FILES:=7}"
 : "${MAX_CSV_FILES:=7}"
-: "${AUTO_EMBED:=1}"
+: "${AUTO_EMBED:=0}"  # Отключено по умолчанию - embeddings работает отдельно
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -52,24 +51,14 @@ LOG_FILE="$LOG_DIR/run_$(date '+%F_%H-%M').md"
 # Дублируем вывод в лог-файл и в stdout/stderr для отладки
 exec > >(tee -a "$LOG_FILE") 2>&1
 
-# Загружаем функции отправки Telegram
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "$SCRIPT_DIR/send_telegram.sh" ]]; then
-  # shellcheck disable=SC1090
-  source "$SCRIPT_DIR/send_telegram.sh"
-else
-  echo "[ERROR] Файл send_telegram.sh не найден" >&2
-fi
-
 # ------------------------------------------
 extract_summary() {
   local log_file="$1"
 
-  # Если есть ERROR - не извлекаем "успешную" статистику
-  if grep -q "\[ERROR\]" "$log_file"; then
-    grep -E "\[ERROR\].*" "$log_file" | sort | uniq | head -3
-    return
-  fi
+  # Извлекаем только статистику, без ошибок
+  # Ищем только успешные маркеры
+  grep -E "^\([0-9]{2}\.[0-9]{2}\.[0-9]{4}\) 📦 Последний файл:|🔄 Синхронизация:|Эмбеддинги (обновлены|:)|⏱ Прошедшее время:|✅ Импорт завершён:" "$log_file" | sort | uniq | head -10
+}
 
   # Проверяем особые случаи
   if grep -q "⚠️  Не удалось скачать CSV\." "$log_file"; then
@@ -105,12 +94,6 @@ if [[ "$AUTO_EMBED" != "1" ]]; then
   echo "[INFO] Автообновление эмбеддингов отключено (AUTO_EMBED=$AUTO_EMBED)"
 fi
 
-  if ! python3 /scripts/download_csvs.py latest; then
-    cmd_status=$?
-    record_failure "$cmd_status"
-    # Ошибка уже выведена Python-скриптом с подробностями
-  fi
-
   if ! /scripts/import_all.sh "$FILES_DIR"; then
     cmd_status=$?
     record_failure "$cmd_status"
@@ -122,16 +105,6 @@ fi
     old_logs=$(ls -1t "$LOG_DIR"/*.md 2>/dev/null | tail -n +$((MAX_LOG_FILES+1)))
     if [[ -n "$old_logs" ]]; then
       for f in $old_logs; do
-        log_date=$(echo "$f" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 | awk -F- '{print $3"."$2"."$1}')
-        echo "$log_date  $f"
-        rm -f "$f"
-      done
-    fi
-
-    maintenance_logs=$(ls -1t "$LOG_DIR"/maintenance_*.log 2>/dev/null | tail -n +$((MAX_MAINTENANCE_LOG_FILES+1)))
-    if [[ -n "$maintenance_logs" ]]; then
-      echo -e "\n🔥 Удаляем старые maintenance-логи"
-      for f in $maintenance_logs; do
         log_date=$(echo "$f" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 | awk -F- '{print $3"."$2"."$1}')
         echo "$log_date  $f"
         rm -f "$f"
@@ -158,34 +131,16 @@ echo "=============================================="
 
 } >>"$LOG_FILE" 2>&1 || true
 
-if [[ $status -ne 0 ]]; then
-  echo "[ERROR] Скрипт завершился с кодом $status" >> "$LOG_FILE"
-  sync "$LOG_FILE" 2>/dev/null || true
-
-  # Отправляем HTML уведомление об ошибке
-  send_telegram_html "❌ Ошибка импорта (код $status)" "$LOG_FILE"
+# Выводим summary в stdout для Semaphore/Ansible
+echo ""
+if [[ $status -eq 0 ]]; then
+  echo "=== ✅ ИМПОРТ ЗАВЕРШЁН УСПЕШНО (код $status) ==="
+  extract_summary "$LOG_FILE"
+  echo "========================================"
 else
-  # Формируем информативное сообщение на основе статистики из лога
-  if grep -qiE "(psql: error|Traceback|Exception)" "$LOG_FILE"; then
-    echo "[WARN] Обнаружены сообщения об ошибках в логе" >> "$LOG_FILE"
-    sync "$LOG_FILE" 2>/dev/null || true
-    # Отправляем HTML уведомление об ошибке POSTGRES
-    send_telegram_html "⚠️ Ошибка импорта POSTGRES" "$LOG_FILE"
-  else
-    # Извлекаем статистику из лога
-    SUMMARY=$(extract_summary "$LOG_FILE")
-    if [[ -n "$SUMMARY" ]]; then
-      # Экранируем HTML спецсимволы в summary
-      SUMMARY_ESCAPED=$(echo "$SUMMARY" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')
-      # Отправляем HTML уведомление с успешным импортом
-      send_telegram_html "📊 Импорт завершён успешно
-
-${SUMMARY_ESCAPED}" "$LOG_FILE"
-    else
-      # Heartbeat: нет новых файлов - передаём лог для извлечения статистики
-      send_heartbeat "ℹ️ Новых файлов нет" "$LOG_FILE"
-    fi
-  fi
+  echo "=== ❌ ОШИБКА ИМПОРТА (код $status) ==="
+  grep -E "\[ERROR\]" "$LOG_FILE" | head -5 || echo "Подробности в логе: $LOG_FILE"
+  echo "========================================"
 fi
 
 exit $status
