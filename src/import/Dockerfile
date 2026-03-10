@@ -37,18 +37,17 @@ ENV TZ=UTC \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    CRON_IMPORT_SCHEDULE="5 0 * * *" \
-    CRON_MAINTENANCE_SCHEDULE="0 5 * * *"
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Set working directory
 WORKDIR /app
 
-# Install ONLY runtime dependencies (no gcc, no build tools!)
+# Install ONLY runtime dependencies
 RUN apk add --no-cache \
     postgresql-client \
     bash \
     curl \
+    ca-certificates \
     && ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime \
     && echo ${TZ} > /etc/timezone \
     && addgroup -g 10001 appuser && adduser -D -u 10001 -G appuser appuser
@@ -56,31 +55,16 @@ RUN apk add --no-cache \
 # Copy compiled Python packages from builder
 COPY --from=builder /install /usr/local/lib/python3.12/site-packages
 
-# Copy application code (with ownership)
+# Copy application code
 COPY --chown=appuser:appuser ./src/import/scripts /scripts
-COPY --chown=appuser:appuser ./src/import/entrypoint.sh /usr/local/bin/entrypoint.sh
 
-# Create appuser home directory and profile with environment
-RUN mkdir -p /home/appuser && \
-    chown appuser:appuser /home/appuser
+# Create directories
+RUN mkdir -p /home/appuser /var/log/registry && \
+    chown appuser:appuser /home/appuser /var/log/registry && \
+    chmod +x /scripts/*.sh
 
-# Configure cron directories and set permissions
-# NOTE: busybox crond reads from /etc/crontabs/, NOT /etc/cron.d/
-# Crontab will be generated at runtime by entrypoint.sh from environment variables
-# Remove default root crontab to avoid Permission denied errors when running as appuser
-RUN chmod +x /scripts/* /usr/local/bin/entrypoint.sh \
-    && mkdir -p /etc/crontabs \
-    && rm -f /etc/crontabs/root \
-    && touch /etc/crontabs/appuser \
-    && chmod 0644 /etc/crontabs/appuser \
-    && chown appuser:appuser /etc/crontabs/appuser \
-    && touch /var/log/cron.log \
-    && chmod 0644 /var/log/cron.log \
-    && chown appuser:appuser /var/log/cron.log
+# Run as appuser
+USER appuser
 
-# Healthcheck (will be overridden by compose.yaml, but useful for local runs)
-HEALTHCHECK --interval=60s --timeout=10s --start-period=60s --retries=3 \
-    CMD pg_isready -h postgres_registry -U postgres && pidof crond >/dev/null
-
-# Run as root (crond needs root, but scripts will run as appuser via su in crontab)
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+# Default command (can be overridden by compose run)
+CMD ["/scripts/run_import.sh"]

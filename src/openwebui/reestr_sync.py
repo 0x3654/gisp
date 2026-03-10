@@ -19,6 +19,7 @@ from typing import Dict, Any, List, Tuple, Set
 
 BASE_URL = f"http://api:{os.getenv('API_PORT', '8000')}/reestr"
 SEMANTIC_URL = f"http://semantic:{os.getenv('SEMANTIC_PORT', '8010')}/semantic_normalize"
+SEMANTIC_BATCH_URL = f"http://semantic:{os.getenv('SEMANTIC_PORT', '8010')}/batch_compare"
 SEMANTIC_REESTR_URL = f"http://api:{os.getenv('API_PORT', '8000')}/reestr/semantic"
 
 TIMEOUT = 10
@@ -269,30 +270,47 @@ class Pipe:
             base_lines.append(embedding_preview)
         return "\n".join(base_lines) if base_lines else json.dumps(result, ensure_ascii=False)
 
-    def semantic_compare(self, text_a: str, text_b: str, debug_mode: bool) -> str:
+    def semantic_compare(self, text_a: str, text_b: str, debug_mode: bool, response_format: str = "markdown") -> str:
         result_a, payload_a, error_a = self._semantic_normalize_request(text_a, debug_mode)
         if error_a:
-            return f"❌ Ошибка при обработке первой строки:\n{error_a}"
+            error_msg = f"❌ Ошибка при обработке первой строки:\n{error_a}"
+            return error_msg if response_format == "markdown" else {"error": error_a, "error_code": "first_text_error"}
         if not isinstance(result_a, dict):
-            return "❌ Неожиданный ответ semantic по первой строке."
+            error_msg = "❌ Неожиданный ответ semantic по первой строке."
+            return error_msg if response_format == "markdown" else {"error": "Unexpected semantic response for first text", "error_code": "first_text_invalid_response"}
 
         result_b, payload_b, error_b = self._semantic_normalize_request(text_b, debug_mode)
         if error_b:
-            return f"❌ Ошибка при обработке второй строки:\n{error_b}"
+            error_msg = f"❌ Ошибка при обработке второй строки:\n{error_b}"
+            return error_msg if response_format == "markdown" else {"error": error_b, "error_code": "second_text_error"}
         if not isinstance(result_b, dict):
-            return "❌ Неожиданный ответ semantic по второй строке."
+            error_msg = "❌ Неожиданный ответ semantic по второй строке."
+            return error_msg if response_format == "markdown" else {"error": "Unexpected semantic response for second text", "error_code": "second_text_invalid_response"}
 
         vector_a = self._embedding_vector(result_a.get("embedding"))
         if not vector_a:
-            return "❌ Сервис semantic вернул пустой embedding для первой строки."
+            error_msg = "❌ Сервис semantic вернул пустой embedding для первой строки."
+            return error_msg if response_format == "markdown" else {"error": "Empty embedding for first text", "error_code": "first_text_no_embedding"}
         vector_b = self._embedding_vector(result_b.get("embedding"))
         if not vector_b:
-            return "❌ Сервис semantic вернул пустой embedding для второй строки."
+            error_msg = "❌ Сервис semantic вернул пустой embedding для второй строки."
+            return error_msg if response_format == "markdown" else {"error": "Empty embedding for second text", "error_code": "second_text_no_embedding"}
 
         similarity = self._cosine_similarity(vector_a, vector_b)
         if similarity is None:
-            return "❌ Не удалось вычислить косинусную дистанцию между строками."
+            error_msg = "❌ Не удалось вычислить косинусную дистанцию между строками."
+            return error_msg if response_format == "markdown" else {"error": "Failed to compute cosine similarity", "error_code": "similarity_computation_failed"}
         distance = 1 - similarity
+
+        # JSON response - только расстояния без лишнего текста
+        if response_format == "json":
+            return json.dumps(
+                {
+                    "distance": round(distance, 4),
+                    "similarity": round(similarity, 4),
+                },
+                ensure_ascii=False,
+            )
 
         def _format_entry(
             label: str,
@@ -357,120 +375,59 @@ class Pipe:
         candidates: List[str],
         debug_mode: bool,
         max_rows: int,
+        response_format: str = "markdown",
     ) -> str:
-        result_origin, payload_origin, error_origin = self._semantic_normalize_request(
-            origin, debug_mode
-        )
-        if error_origin:
-            return f"❌ Ошибка при обработке исходной строки:\n{error_origin}"
-        if not isinstance(result_origin, dict):
-            return "❌ Неожиданный ответ semantic по исходной строке."
-
-        origin_vector = self._embedding_vector(result_origin.get("embedding"))
-        if not origin_vector:
-            return "❌ Сервис semantic вернул пустой embedding для исходной строки."
-
-        candidate_rows: List[Dict[str, Any]] = []
-        best_match: tuple[float, Dict[str, Any]] | None = None
-        details: List[str] = []
-        for idx, candidate in enumerate(candidates, start=1):
-            result_candidate, payload_candidate, error_candidate = (
-                self._semantic_normalize_request(candidate, debug_mode)
-            )
-            if error_candidate:
-                details.append(
-                    f"{idx}. {candidate} → ошибка: {error_candidate.replace(chr(10), ' ')}"
-                )
-                continue
-            if not isinstance(result_candidate, dict):
-                details.append(f"{idx}. {candidate} → неожиданный ответ semantic")
-                continue
-            vector_candidate = self._embedding_vector(result_candidate.get("embedding"))
-            if not vector_candidate:
-                details.append(f"{idx}. {candidate} → пустой embedding")
-                continue
-            similarity = self._cosine_similarity(origin_vector, vector_candidate)
-            if similarity is None:
-                details.append(f"{idx}. {candidate} → не удалось вычислить сходство")
-                continue
-            distance = 1 - similarity
-            synonyms_list = [
-                str(item)
-                for item in (result_candidate.get("synonyms_applied") or [])
-                if isinstance(item, str) and item.strip()
-            ]
-            row_entry = {
-                "text": candidate,
-                "normalized": result_candidate.get("normalized") or "",
-                "synonyms": ", ".join(synonyms_list),
-                "distance": distance,
-                "similarity": similarity,
+        """Compare origin against multiple candidates using batch endpoint."""
+        try:
+            payload = {
+                "origin": origin,
+                "candidates": candidates,
+                "limit": max_rows or DEFAULT_MAX_ROWS,
+                "normalize": True,
+                "apply_synonyms": False,
             }
-            candidate_rows.append(row_entry)
-            details.append(
-                f"{idx}. {candidate} → distance={distance:.4f} similarity={similarity:.4f}"
-            )
-            if best_match is None or similarity > best_match[0]:
-                best_match = (similarity, row_entry)
+            resp = requests.post(SEMANTIC_BATCH_URL, json=payload, timeout=30)
+            if resp.status_code != 200:
+                error_msg = f"❌ Ошибка batch_compare: HTTP {resp.status_code}"
+                return error_msg if response_format == "markdown" else {"error": f"HTTP {resp.status_code}", "error_code": "batch_http_error"}
 
-        lines: List[str] = ["🧮 Сравнение строки с набором вариантов"]
-        if debug_mode and payload_origin:
-            lines.append("Payload (исходная): " + json.dumps(payload_origin, ensure_ascii=False))
-        lines.append("")
-        lines.append("Исходная строка:")
-        lines.append(_md_escape(origin) or "—")
-        normalized_origin = _md_escape(result_origin.get("normalized") or "")
-        if normalized_origin:
-            lines.append(f"Normalized: {normalized_origin}")
-        synonyms_origin = result_origin.get("synonyms_applied") or []
-        if synonyms_origin:
-            lines.append("Synonyms: " + ", ".join(map(str, synonyms_origin)))
-        lines.append("")
+            result = resp.json()
+            results = result.get("results", [])
 
-        if not best_match:
-            lines.append("❌ Не удалось подобрать подходящее совпадение среди кандидатов.")
-            if details:
-                lines.append("\n".join(details))
-            return "\n".join(line for line in lines if line).strip()
+            if not results:
+                error_msg = "❌ Нет результатов сравнения"
+                return error_msg if response_format == "markdown" else {"error": "No results", "error_code": "no_results"}
 
-        candidate_rows.sort(
-            key=lambda item: (item.get("distance", 1.0), -item.get("similarity", -1.0))
-        )
-        best_similarity, best_row = best_match
-        # Ensure best_row reference points to sorted entry for consistent formatting
-        if candidate_rows:
-            best_row = candidate_rows[0]
-            best_similarity = best_row.get("similarity", best_similarity)
-        best_distance = 1 - best_similarity if isinstance(best_similarity, (int, float)) else None
+            # JSON response - возвращаем как есть
+            if response_format == "json":
+                return json.dumps(results, ensure_ascii=False, indent=2)
 
-        lines.append("Лучшее совпадение:")
-        lines.append(f"➡️ {best_row.get('text')}")
-        normalized_best = _md_escape(best_row.get("normalized") or "")
-        if normalized_best:
-            lines.append(f"Normalized: {normalized_best}")
-        synonyms_best = best_row.get("synonyms")
-        if synonyms_best:
-            lines.append("Synonyms: " + synonyms_best)
-        if isinstance(best_distance, (int, float)):
-            lines.append(f"📏 Косинусная дистанция: {best_distance:.4f}")
-        if isinstance(best_similarity, (int, float)):
-            lines.append(f"📈 Косинусное сходство: {best_similarity:.4f}")
-        lines.append("")
-        lines.append("Все варианты (сортировка по сходству):")
-        display_rows = candidate_rows[: max_rows or DEFAULT_MAX_ROWS]
-        table = self._format_compare_table(display_rows)
-        if table:
-            lines.append(table)
-            if len(candidate_rows) > len(display_rows):
-                lines.append(
-                    f"Показаны {len(display_rows)} из {len(candidate_rows)} вариантов (управляется `max:`)."
-                )
-        if details and debug_mode:
+            # Markdown response
+            lines: List[str] = ["🧮 Сравнение строки с набором вариантов"]
             lines.append("")
-            lines.append("Диагностика:")
-            lines.extend(details)
+            lines.append(f"Исходная строка: {_md_escape(origin)}")
+            lines.append(f"Всего кандидатов: {result.get('total', len(candidates))}")
+            lines.append(f"Показано: {result.get('count', len(results))}")
+            lines.append("")
+            lines.append("## Результаты (лучшие совпадения):")
+            lines.append("")
 
-        return "\n".join(line for line in lines if line).strip()
+            for idx, (text, similarity) in enumerate(results[: max_rows or DEFAULT_MAX_ROWS], start=1):
+                distance = 1 - similarity
+                lines.append(f"{idx}. {_md_escape(text)}")
+                lines.append(f"   - similarity: {similarity:.4f}, distance: {distance:.4f}")
+
+            return "\n".join(lines)
+
+        except requests.Timeout:
+            error_msg = "❌ Timeout при обращении к batch_compare"
+            return error_msg if response_format == "markdown" else {"error": "Timeout", "error_code": "timeout"}
+        except requests.ConnectionError:
+            error_msg = "❌ Не удалось подключиться к batch_compare"
+            return error_msg if response_format == "markdown" else {"error": "Connection error", "error_code": "connection_error"}
+        except Exception as exc:
+            error_msg = f"❌ Ошибка: {exc}"
+            return error_msg if response_format == "markdown" else {"error": str(exc), "error_code": "exception"}
 
     def _call_semantic_reestr(
         self,
@@ -1311,6 +1268,22 @@ class Pipe:
 
         text_stripped = text.strip()
 
+        # Обработка формата category (JSON с type/input/options)
+        category_type = body.get("type")
+        if category_type == "category":
+            category_input = body.get("input", "")
+            category_options = body.get("options", [])
+            if isinstance(category_options, list) and category_input:
+                debug_semantic = body.get("debug_semantic", SHOW_DEBUG_SEMANTIC_DEFAULT)
+                max_rows = body.get("max_rows", DEFAULT_MAX_ROWS)
+                return self.semantic_compare_many(
+                    category_input,
+                    category_options,
+                    bool(debug_semantic),
+                    max_rows,
+                    response_format_type,
+                )
+
         compare_match = re.match(
             r"(?is)^(сравни|compare)\b(?:[:=]?\s*)?(.*)$",
             text_stripped,
@@ -1333,7 +1306,10 @@ class Pipe:
                 else bool(debug_semantic)
             )
 
-            compare_limit = self._extract_max_rows(compare_text)
+            # max_rows: приоритет у body.max_rows, затем извлекаем из текста
+            compare_limit = body.get("max_rows")
+            if compare_limit is None:
+                compare_limit = self._extract_max_rows(compare_text)
             compare_clean = self.clean_control_params(compare_text)
             compare_clean = self._strip_debug_lines(compare_clean)
 
@@ -1365,11 +1341,11 @@ class Pipe:
                 )
             if len(compare_lines) == 2:
                 text_first, text_second = compare_lines[0], compare_lines[1]
-                return self.semantic_compare(text_first, text_second, debug_mode)
+                return self.semantic_compare(text_first, text_second, debug_mode, response_format_type)
 
             origin = compare_lines[0]
             variants = compare_lines[1:]
-            return self.semantic_compare_many(origin, variants, debug_mode, compare_limit)
+            return self.semantic_compare_many(origin, variants, debug_mode, compare_limit, response_format_type)
 
         semantic_match = re.match(
             r"(?is)^(semantic|sem|семантик[а-я]*|сима)\s*\|?\s*(.*)$", text_stripped

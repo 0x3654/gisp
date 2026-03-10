@@ -11,6 +11,12 @@ send_telegram_html() {
   local message="$1"
   local log_file="${2:-}"
 
+  # Проверяем отключены ли уведомления (для изолированной сети)
+  if [[ "${DISABLE_TELEGRAM:-0}" == "1" ]]; then
+    echo "[INFO] Telegram уведомления отключены (DISABLE_TELEGRAM=1)" >&2
+    return 0
+  fi
+
   if [[ -z "${BOT_TOKEN:-}" || -z "${CHAT_ID:-}" ]]; then
     echo "[WARN] Переменные Telegram не заданы" >&2
     return 0

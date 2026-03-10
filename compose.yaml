@@ -166,7 +166,7 @@ services:
   # - ARM64 PyTorch: ~2.46GB, 104-186ms
   semantic:
     image: docker.io/0x3654/gisp-semantic-onnx:latest
-    container_name: gisp_semantic_service
+    container_name: gisp_semantic
     labels:
       - com.centurylinklabs.watchtower.enable=false
     env_file: .env
@@ -213,8 +213,9 @@ services:
       - internal
   embeddings-worker:
     image: docker.io/0x3654/gisp-semantic-onnx:latest
+    #container_name: gisp_embeddings-worker
     labels:
-      - com.centurylinklabs.watchtower.enable=true
+      - com.centurylinklabs.watchtower.enable=false
     profiles:
       - embeddings
     env_file: .env
