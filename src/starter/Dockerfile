@@ -8,7 +8,7 @@ ARG VERSION=1.0
 
 # Metadata labels
 LABEL maintainer="0x3654"
-LABEL service="starter"
+LABEL service="starter-dump"
 LABEL version=$VERSION
 LABEL org.opencontainers.image.source="https://github.com/0x3654/gisp"
 
