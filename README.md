@@ -269,7 +269,6 @@ docker compose --profile tasks run --rm downloader
 docker compose --profile tasks run --rm import
 ```
 
-Подробнее см. [docs/NETWORK_ISOLATION.md](docs/NETWORK_ISOLATION.md)
 
 # I. **FastAPI Web API**
 <details>
@@ -559,10 +558,6 @@ docker compose --profile tasks run --rm import
 
 ---
 
-# **Дополнительная документация**
-
-- [docs/ARCHITECTURE_FINAL.md](docs/ARCHITECTURE_FINAL.md) — Полная архитектура проекта и план рефакторинга
-- [docs/NETWORK_ISOLATION.md](docs/NETWORK_ISOLATION.md) — Описание сетевой изоляции и профилей запуска
 - [Ansible роль](https://github.com/0x3654/ansible/tree/main/roles/gisp) — Автоматизация деплоя и управления
 
 ---
