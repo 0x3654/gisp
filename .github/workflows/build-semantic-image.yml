@@ -68,27 +68,4 @@ jobs:
             docker.io/${{ secrets.DOCKERHUB_USERNAME }}/gisp-semantic-pytorch:latest
             docker.io/${{ secrets.DOCKERHUB_USERNAME }}/gisp-semantic-pytorch:2.2
 
-      # Make repositories public
-      - name: Make ONNX repository public
-        run: |
-          HUB_JWT=$(curl -s -X POST \
-            -H "Content-Type: application/json" \
-            -d "{\"username\":\"${{ secrets.DOCKERHUB_USERNAME }}\",\"password\":\"${{ secrets.DOCKERHUB_TOKEN }}\"}" \
-            https://hub.docker.com/v2/users/login/ | jq -r '.token')
-          curl -f -X POST \
-            -H "Authorization: JWT ${HUB_JWT}" \
-            -H "Content-Type: application/json" \
-            -d '{"visibility": "public"}' \
-            https://hub.docker.com/v2/namespaces/${{ secrets.DOCKERHUB_USERNAME }}/repositories/gisp-semantic-onnx/set-visibility
 
-      - name: Make PyTorch repository public
-        run: |
-          HUB_JWT=$(curl -s -X POST \
-            -H "Content-Type: application/json" \
-            -d "{\"username\":\"${{ secrets.DOCKERHUB_USERNAME }}\",\"password\":\"${{ secrets.DOCKERHUB_TOKEN }}\"}" \
-            https://hub.docker.com/v2/users/login/ | jq -r '.token')
-          curl -f -X POST \
-            -H "Authorization: JWT ${HUB_JWT}" \
-            -H "Content-Type: application/json" \
-            -d '{"visibility": "public"}' \
-            https://hub.docker.com/v2/namespaces/${{ secrets.DOCKERHUB_USERNAME }}/repositories/gisp-semantic-pytorch/set-visibility

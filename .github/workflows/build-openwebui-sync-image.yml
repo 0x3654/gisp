@@ -47,14 +47,3 @@ jobs:
             version=${{ env.VERSION }}
             org.opencontainers.image.source=https://github.com/0x3654/gisp
 
-      - name: Make repository public
-        run: |
-          HUB_JWT=$(curl -s -X POST \
-            -H "Content-Type: application/json" \
-            -d "{\"username\":\"${{ secrets.DOCKERHUB_USERNAME }}\",\"password\":\"${{ secrets.DOCKERHUB_TOKEN }}\"}" \
-            https://hub.docker.com/v2/users/login/ | jq -r '.token')
-          curl -f -X POST \
-            -H "Authorization: JWT ${HUB_JWT}" \
-            -H "Content-Type: application/json" \
-            -d '{"visibility": "public"}' \
-            https://hub.docker.com/v2/namespaces/${{ secrets.DOCKERHUB_USERNAME }}/repositories/${{ env.IMAGE_NAME }}/set-visibility
