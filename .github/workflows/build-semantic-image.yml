@@ -9,6 +9,7 @@ on:
       - "src/semantic/model_loader.py"
       - "src/semantic/Dockerfile.onnx"
       - "src/semantic/Dockerfile.pytorch"
+      - "src/import/scripts/update_embeddings.py"
       - ".github/workflows/build-semantic-image.yml"
   workflow_dispatch:
 

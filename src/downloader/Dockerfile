@@ -1,22 +1,19 @@
 # syntax=docker/dockerfile:1.6
 # ===================================
-# BUILDER STAGE - Compile dependencies
+# BUILDER STAGE - Install dependencies
 # ===================================
 FROM python:3.12-alpine AS builder
 
 ARG VERSION=1.0
 
-# Install build deps for psycopg2 (stay in builder only)
-RUN apk add --no-cache \
-    gcc \
-    musl-dev \
-    postgresql-dev
-
 # Create virtual environment and install packages
+# requests/pysocks/urllib3 are pure Python — no compilation needed,
+# but builder stage keeps pip and wheel out of the final image
 RUN python -m venv /venv \
     && /venv/bin/pip install --no-cache-dir \
-        psycopg2==2.9.10 \
-        requests==2.32.3
+        requests==2.32.3 \
+        pysocks==1.7.1 \
+        urllib3==2.6.3
 
 # ===================================
 # FINAL STAGE - Runtime only
@@ -27,7 +24,7 @@ ARG VERSION=1.0
 
 # Metadata labels
 LABEL maintainer="0x3654"
-LABEL service="gisp_import"
+LABEL service="gisp_downloader"
 LABEL version=$VERSION
 LABEL org.opencontainers.image.source="https://github.com/0x3654/gisp"
 
@@ -36,32 +33,34 @@ LABEL org.opencontainers.image.source="https://github.com/0x3654/gisp"
 ENV TZ=UTC \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PATH="/venv/bin:$PATH"
+    PATH="/venv/bin:$PATH" \
+    FILES_DIR=/files \
+    MAX_CSV_FILES=7
 
 # Set working directory
 WORKDIR /app
 
-# Runtime: libpq for psycopg2, bash for shell scripts, curl for healthchecks in scripts
+# openssh-client is required for the SSH tunnel download mode (ssh -D SOCKS proxy)
 RUN apk add --no-cache \
-    libpq \
     bash \
     curl \
     ca-certificates \
+    openssh-client \
     && ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime \
     && echo ${TZ} > /etc/timezone \
     && addgroup -g 10001 appuser \
     && adduser -D -u 10001 -G appuser appuser \
-    && mkdir -p /home/appuser /var/log/registry \
-    && chown appuser:appuser /home/appuser /var/log/registry
+    && mkdir -p /home/appuser /files \
+    && chown appuser:appuser /home/appuser /files
 
-# Copy virtual environment from builder (no gcc, no musl-dev, no postgresql-dev)
+# Copy virtual environment from builder
 COPY --from=builder /venv /venv
 
-# Copy application scripts
-COPY --chown=appuser:appuser --chmod=755 ./src/import/scripts /scripts
+# Copy application scripts and entrypoint
+COPY --chown=appuser:appuser --chmod=755 src/downloader/scripts /scripts
+COPY --chown=appuser:appuser --chmod=755 src/downloader/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Run as appuser
 USER appuser
 
-# Default command (can be overridden by compose run)
-CMD ["/scripts/run_import.sh"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

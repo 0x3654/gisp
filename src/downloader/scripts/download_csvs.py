@@ -158,6 +158,38 @@ def save_payload(path: str, data: bytes) -> None:
     os.replace(tmp_path, path)
 
 
+def create_marker(filename: str) -> None:
+    """Create .ready_* marker file to signal import service"""
+    marker_path = os.path.join(FILES_DIR, f".ready_{filename}")
+    with open(marker_path, "w") as f:
+        f.write(f"Created at {datetime.now().isoformat()}\n")
+    print(f"📝 Создан маркер: .ready_{filename}")
+
+
+def cleanup_old_csvs() -> None:
+    """Remove old CSV files, keeping only MAX_CSV_FILES most recent ones"""
+    max_files = int(os.getenv("MAX_CSV_FILES", "7"))
+    csv_files = []
+
+    for fname in os.listdir(FILES_DIR):
+        if fname.startswith("data-") and fname.endswith(".csv"):
+            full_path = os.path.join(FILES_DIR, fname)
+            csv_files.append((full_path, os.path.getmtime(full_path)))
+
+    # Sort by modification time (newest first)
+    csv_files.sort(key=lambda x: x[1], reverse=True)
+
+    # Remove files beyond MAX_CSV_FILES
+    if len(csv_files) > max_files:
+        files_to_delete = csv_files[max_files:]
+        for file_path, _ in files_to_delete:
+            try:
+                os.remove(file_path)
+                print(f"🔥 Удален старый CSV: {os.path.basename(file_path)}")
+            except Exception as e:
+                print(f"⚠️  Ошибка удаления {file_path}: {e}", file=sys.stderr)
+
+
 def download_latest() -> None:
     ensure_files_dir()
     last_existing = existing_latest_date()
@@ -187,6 +219,12 @@ def download_latest() -> None:
 
     print(f"💾  Скачан файл {name} ({size_mb:.2f} MB)")
     print(f"🕒  Дата источника: {remote_date:%d.%m.%Y}")
+
+    # Create marker file for import service
+    create_marker(name)
+
+    # Cleanup old CSV files
+    cleanup_old_csvs()
 
 
 if __name__ == "__main__":

@@ -1,10 +1,21 @@
 # **ГИСП реестр, API и Чат для поиска**
 
+[![API](https://github.com/0x3654/gisp/actions/workflows/build-api-image.yml/badge.svg)](https://github.com/0x3654/gisp/actions/workflows/build-api-image.yml)
+[![Import](https://github.com/0x3654/gisp/actions/workflows/build-import-image.yml/badge.svg)](https://github.com/0x3654/gisp/actions/workflows/build-import-image.yml)
+[![Semantic](https://github.com/0x3654/gisp/actions/workflows/build-semantic-image.yml/badge.svg)](https://github.com/0x3654/gisp/actions/workflows/build-semantic-image.yml)
+[![OpenWebUI](https://github.com/0x3654/gisp/actions/workflows/build-openwebui-sync-image.yml/badge.svg)](https://github.com/0x3654/gisp/actions/workflows/build-openwebui-sync-image.yml)
+[![Starter](https://github.com/0x3654/gisp/actions/workflows/build-starter-image.yml/badge.svg)](https://github.com/0x3654/gisp/actions/workflows/build-starter-image.yml)
+
+[![Docker Hub](https://img.shields.io/badge/docker-0x3654-blue?logo=docker)](https://hub.docker.com/u/0x3654)
+[![License: WTFPL](https://img.shields.io/badge/License-WTFPL-blue?logo=unlicense)](http://www.wtfpl.net/about/)
+[![multi-arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-green)](https://github.com/0x3654/gisp/pkgs/container/gisp-api)
+[![Last commit](https://img.shields.io/github/last-commit/0x3654/gisp)](https://github.com/0x3654/gisp/commits/master)
+
 Поиск по реестру российской промышленной продукции Минпромторга в формате чата с автоматическим обновлением данных и возможностью интеграции с api.
 
 `PostgreSQL` с готовой структурой, `FastAPI‑шлюз`, `семантический сервис` и чат-интерфейс на базе `OpenWebUI`.
 
-`import` автоматически скачивает свежие CSV файлы каждую ночь, пишет логи, чистит старые файлы.
+`downloader` скачивает свежие CSV каждый вечер, `import` нормализует и заливает в базу, `embeddings-worker` обновляет семантический индекс. Все три запускаются по расписанию через Semaphore/Ansible, без cron в контейнерах.
 
 Вы получаете поиск двумя способами: строгие фильтры по параметрам и семантический режим поиска по наименованию с расширением синонимами — по умолчанию чат комбинирует оба источника и выводит результаты в едином списке. Подробности выбора режима описаны в разделе [Описание параметров в чате](#описание-параметров-в-чате).
 
@@ -28,10 +39,12 @@
 Выполните bootstrap-скрипт (скачивает ~3 ГБ образов и ~1 ГБ данных, останавливается при любой ошибке):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/0x3654/gisp/master/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/0x3654/gisp/master/scripts/bootstrap.sh | bash
 ```
 
-Скрипт установит Docker/Compose/Git, клонирует репозиторий, подготовит конфиги, загрузит стартовый дамп через `starter-dump` и запустит контейнеры `postgres_registry`, `api`, `import`, `semantic`, `openwebui`. После завершения откройте http://localhost:3333 admin@gisp.ru 123
+Скрипт установит Docker/Compose/Git, клонирует репозиторий, подготовит конфиги, загрузит стартовый дамп через `starter-dump` и запустит контейнеры `postgres_registry`, `api`, `semantic`, `openwebui`. После завершения откройте http://localhost:3333 admin@gisp.ru 123
+
+Для обновления данных используйте Ansible playbooks или Semaphore (см. раздел "Сетевая изоляция").
 
 **Примечание:** Для продакшен деплоя и управления рекомендуем использовать Ansible роль: [0x3654/ansible](https://github.com/0x3654/ansible/tree/main/roles/gisp)
 
@@ -82,19 +95,21 @@ curl -fsSL https://raw.githubusercontent.com/0x3654/gisp/master/bootstrap.sh | b
 
 7. Запустите стек:
    ```bash
-   docker compose pull  # Подтянуть последние образы из Docker Hub
-   docker compose up -d postgres_registry api import semantic openwebui
+   docker compose pull                              # Подтянуть последние образы из Docker Hub
+   docker compose up -d postgres_registry api semantic openwebui
    ```
+   **Примечание:** Сервисы `downloader` и `import` находятся в профиле `tasks` и запускаются по требованию через Semaphore/Ansible для обновления данных.
 
 # **Структура проекта**
 
 ```
 /src/                    # Весь исходный код (включая Dockerfile)
 ├── api/                 # FastAPI-шлюз
-├── import/              # Фоновый импортёр
+├── downloader/          # Скачивание CSV (SSH tunnel, cleanup)
+├── import/              # Импорт CSV в БД + embeddings-worker
 ├── openwebui/           # OpenWebUI-sync сервисы
 ├── semantic/            # Семантический сервис (Dockerfile.onnx, Dockerfile.pytorch)
-└── starter/             # Starter service (Dockerfile, entrypoint.sh)
+└── starter/             # Starter service (восстановление snapshot БД)
 
 /services/               # Только runtime данные
 ├── postgres/data/       # PostgreSQL файлы БД
@@ -104,7 +119,9 @@ curl -fsSL https://raw.githubusercontent.com/0x3654/gisp/master/bootstrap.sh | b
 
 compose.yaml             # Docker Compose конфигурация
 .env.example             # Шаблон конфигурации
-bootstrap.sh             # Скрипт быстрого деплоя
+scripts/
+├── bootstrap.sh         # Скрипт быстрого деплоя
+└── send_telegram.sh     # Хелпер Telegram-уведомлений (используется Ansible)
 ```
 
 **Ключевые особенности архитектуры:**
@@ -115,6 +132,7 @@ bootstrap.sh             # Скрипт быстрого деплоя
 
 **CI/CD workflows:**
 - `build-api-image.yml` → `gisp-api:latest`
+- `build-downloader-image.yml` → `gisp-downloader:latest`
 - `build-import-image.yml` → `gisp-import:latest`
 - `build-semantic-image.yml` → `gisp-semantic-onnx:latest` + `gisp-semantic-pytorch:latest`
 - `build-openwebui-sync-image.yml` → `gisp-openwebui-sync:latest`
@@ -126,7 +144,7 @@ bootstrap.sh             # Скрипт быстрого деплоя
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/scheme-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/scheme-light.png">
-  <img alt="Схема сервисов" src="docs/chat-light.png">
+  <img alt="Схема сервисов" src="docs/scheme-light.png">
 </picture>
 
 > ## **Контейнер postgres_registry**
@@ -140,14 +158,21 @@ bootstrap.sh             # Скрипт быстрого деплоя
 > FastAPI-шлюз для REST-запросов и выдачи данных с обрабатывает запросы с фильтрами и семантические запросы.
 
 > ## **Контейнер import**
-> Фоновый импортёр: при старте контейнера и по расписанию скачивает CSV, нормализует данные и заливает в базу. Внутри контейнера настроен cron: в 00:05 ежедневно выполняется `run_import.sh`, в 05:00 — `run_pg_maintenance.sh`
+> Одноразовый импортёр: нормализует CSV и заливает данные в базу. Не имеет доступа к интернету. Работает в профиле `tasks`, запускается по расписанию через Semaphore/Ansible.
 >
-> При необходимости можно запустить импорт вручную:
+> **Запуск через Docker Compose:**
 > ```bash
-> docker compose run --rm import /scripts/run_import.sh
+> docker compose --profile tasks run --rm import
 > ```
-> После успешной загрузки, если `AUTO_EMBED=1`, контейнер вызовет embeddings-worker и обновит эмбеддинги для новых записей.
-> Уведомления о статусе импортов отправляются в Telegram (если заданы `BOT_TOKEN`/`CHAT_ID`).
+>
+> **Запуск через Ansible:**
+> ```bash
+> ansible-playbook playbooks/gisp-downloader.yml  # Сначала скачать CSV
+> ansible-playbook playbooks/gisp-import.yml      # Затем импортировать
+> ```
+>
+> После успешной загрузки импортер завершает работу с кодом 0. Эмбеддинги обновляются отдельным сервисом `embeddings-worker`.
+> Уведомления отправляются на уровне Ansible/Semaphore (контейнер не имеет доступа к интернету).
 
 > ## **Контейнер semantic**
 > FastAPI-шлюз для REST-запросов строит эмбеддинги и расширяет запросы с учетом `synonyms.json`. В образ сразу добавлена модель `paraphrase-multilingual-MiniLM-L12-v2`.
@@ -215,6 +240,36 @@ bootstrap.sh             # Скрипт быстрого деплоя
 > - ✅ `registry.semantic_items` — векторные эмбеддинги для семантического поиска
 >
 > **Примечание:** Сервис запускается один раз, выполняет восстановление и завершается с кодом 0.
+
+# **Сетевая изоляция**
+
+Проект использует две сети Docker для обеспечения безопасности:
+
+| Сеть | Назначение | Доступ в интернет |
+|------|-----------|-------------------|
+| `registry-internal` | Внутренние сервисы (postgres, api, import, semantic) | ❌ Заблокирован |
+| `registry-external` | Внешний доступ (openwebui) | ✅ Разрешён |
+
+**Назначение сервисов по сетям:**
+- `postgres_registry`, `api`, `import`, `semantic` — только `internal` (без интернета)
+- `openwebui` — `internal` + `external` (единственная точка входа)
+- `downloader` — `network_mode: host` (SSH туннель для скачивания CSV)
+
+**Профили запуска:**
+- **По умолчанию**: `postgres_registry`, `api`, `semantic`, `openwebui`
+- **`tasks`**: `downloader`, `import` (запускаются по требованию)
+
+**Примеры запуска:**
+```bash
+# Основные сервисы (вечный запуск)
+docker compose up -d
+
+# Задачи (одноразовый запуск)
+docker compose --profile tasks run --rm downloader
+docker compose --profile tasks run --rm import
+```
+
+Подробнее см. [docs/NETWORK_ISOLATION.md](docs/NETWORK_ISOLATION.md)
 
 # I. **FastAPI Web API**
 <details>
@@ -352,9 +407,10 @@ bootstrap.sh             # Скрипт быстрого деплоя
 >   - Если найден только `INN` или только `TNVED` — создаётся `code` с удалением исходных `inn`/`tnved`
 >   - Итоговые параметры сохраняются в `params`, добавляются `max_rows` и флаг `debug`
 
->6. **Подготовка запроса к API**
->   - В `params_to_send` помещаются только найденные параметры: `code`, `inn`, `tnved`, `okpd2`, `productname`, `regnumber`
->   - Строки и списки объединяются через `|` для передачи нескольких значений
+>6. **Подготовка запроса к API** ([`_build_params_to_send`](#_build_params_to_sendparams))
+>   - В `params_to_send` помещаются только найденные параметры: `code`, `inn`, `tnved`, `okpd2`, `productname`, `nameoforg`, `regnumber`
+>   - Строки и списки объединяются через `|` ([`_prepare_param_value`](#_prepare_param_valuekey-val)) для передачи нескольких значений
+>   - Если есть `regnumber` — все остальные параметры отбрасываются (точный поиск по регномеру)
 
 >7. **Отправка запроса и fallback**
 >   - Первый запрос к API отправляется с текущими `params_to_send
@@ -382,7 +438,7 @@ bootstrap.sh             # Скрипт быстрого деплоя
 >   - Очистка лишних символов и переносов из текста
 </details>
 
-# III. Chat Pipe (`reestr_openwebui.py`)
+# III. Chat Pipe (`reestr_sync.py`)
 
 <details>
 <summary><b>Описание:</b></summary>
@@ -403,12 +459,13 @@ bootstrap.sh             # Скрипт быстрого деплоя
 >- Парсит текст пользователя
 >- Выполняет запрос к API (`/reestr`)
 >- Реализует fallback: преобразование `code` в `tnved` с сокращениями (10→8→6→4), а также сокращения TNVED (8→6→4)
->- Возвращает Markdown-таблицу с переименованными заголовками (`FIELD_RENAME`)
+>- Возвращает Markdown-таблицу с переименованными заголовками (`FIELD_RENAME`); при передаче `response_format: {type: json}` — JSON-объект
 >- При включённом `debug` выводит все попытки fallback и параметры запроса
->- Команда `semantic|…` (или `сима`) выполняет поиск ближайших наименований по эмбеддингам:
+>- Команда `semantic|…` (или `сима`) — семантический поиск через `/reestr/semantic`:
 >  - текст кодируется «как есть», затем расширяется синонимами (например, «сода пищевая» → «гидрокарбонат натрия») из `services/semantic/synonyms.json`;
 >  - результаты ранжируются по количеству совпавших токенов и косинусной дистанции;
 >  - строки без совпадений по токенам отбрасываются для предсказуемой выдачи.
+>- Команда `сравни` с несколькими вариантами использует `/batch_compare` для ранжирования кандидатов по косинусной дистанции за один запрос.
 >  Используется лёгкая лингвистическая модель на CPU — ответы приходят быстро, без участия LLM и без требований к GPU.
 
 </details>
@@ -485,12 +542,27 @@ bootstrap.sh             # Скрипт быстрого деплоя
 
 >- Удаляет строки управления `debug` и `max_rows` из текста
 
-#### `split_terms(value)`
+#### `_prepare_param_value(key, val) → str`
 
-> - Хелпер из API: делит значение `productname` по разделителям `$` (логическое И) и `^` (логическое ИЛИ), удаляя лишние пробелы
+> - Статический метод: нормализует значение параметра перед отправкой в API
+> - `str` → возвращает как есть; `list` → объединяет через `|`; остальное → `str(val)`
+
+#### `_build_params_to_send(params) → dict`
+
+> - Строит словарь параметров для запроса к API из распознанного `params`
+> - Если есть `regnumber` — только он; иначе — `code`, `inn`, `tnved`, `okpd2`, `productname`, `nameoforg`
+> - Значения нормализуются через `_prepare_param_value`
 
 #### `_validate_inn(inn_str)`
 
 > - Проверяет корректность ИНН (10 или 12 цифр)
+
+---
+
+# **Дополнительная документация**
+
+- [docs/ARCHITECTURE_FINAL.md](docs/ARCHITECTURE_FINAL.md) — Полная архитектура проекта и план рефакторинга
+- [docs/NETWORK_ISOLATION.md](docs/NETWORK_ISOLATION.md) — Описание сетевой изоляции и профилей запуска
+- [Ansible роль](https://github.com/0x3654/ansible/tree/main/roles/gisp) — Автоматизация деплоя и управления
 
 ---

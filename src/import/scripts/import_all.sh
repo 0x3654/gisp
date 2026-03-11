@@ -4,8 +4,6 @@ shopt -s nullglob
 
 start_time=$(date +%s)
 SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EMBED_SCRIPT="${SCRIPT_DIR}/update_embeddings.py"
-AUTO_EMBED=${AUTO_EMBED:-1}
 
 FILES_DIR=${FILES_DIR}
 DB=registry
@@ -71,13 +69,15 @@ psql_exec_quiet() {
   psql_exec "$@" >/dev/null
 }
 
+# Ищем CSV файлы в каталоге
 mapfile -t csv_files < <(ls -1t "$FILES_DIR"/data-*.csv 2>/dev/null || true)
 
 if [[ ${#csv_files[@]} -eq 0 ]]; then
-  echo "⚠️  CSV-файлы в каталоге $FILES_DIR не найдены"
+  echo "ℹ️  CSV-файлы в каталоге $FILES_DIR не найдены"
   exit 0
 fi
 
+# Берём самый новый файл
 latest_file="${csv_files[0]}"
 name=$(basename "$latest_file")
 file_date=$(echo "$name" | grep -oE '[0-9]{8}' | head -1 || true)
@@ -109,7 +109,7 @@ if [[ "$already_imported" == "1" ]]; then
   exit 0
 fi
 
-tmpfile=$(mktemp "$FILES_DIR/tmp.$name.XXXXXX")
+tmpfile=$(mktemp "/tmp/tmp.$name.XXXXXX")
 trap 'rm -f "$tmpfile"' EXIT
 preprocess_csv_dynamic "$latest_file" "$tmpfile"
 
@@ -303,25 +303,12 @@ psql_exec_quiet -c "INSERT INTO registry.load_log(file_name,file_size,file_sha25
               VALUES ('$name',$size,'$sha',$inserted_count)
               ON CONFLICT DO NOTHING;"
 
-if [[ "$AUTO_EMBED" == "1" ]]; then
-  if [[ -f "$EMBED_SCRIPT" ]]; then
-    if (( inserted_count > 0 )); then
-      echo "🧠 Обновляем эмбеддинги для файла $name..."
-      if python3 "$EMBED_SCRIPT" --source-file "$name"; then
-        echo "🧠 Эмбеддинги обновлены"
-      else
-        echo "❌ Ошибка при обновлении эмбеддингов"
-        exit 1
-      fi
-    else
-      echo "🧠 Эмбеддинги: новых строк нет, обновление пропущено"
-    fi
-  else
-    echo "⚠️  Скрипт обновления эмбеддингов не найден ($EMBED_SCRIPT). Пропускаем шаг."
-  fi
-else
-  echo "🧠 Эмбеддинги: автообновление отключено (AUTO_EMBED=$AUTO_EMBED)"
-fi
+# NOTE: Маркер не удаляется intentionally
+# Import может быть запущен несколько раз (перезапуск защиты)
+# Проверка already_imported предотвратит дубликаты
+
+# NOTE: Эмбеддинги обновляются отдельным embeddings-worker сервисом
+# Это позволяет разнести нагрузку и улучшить безопасность
 
 # Clean up staging tables for the next run
 psql_exec_quiet -c "

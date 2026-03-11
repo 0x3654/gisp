@@ -27,7 +27,6 @@ services:
     restart: unless-stopped
     networks:
        - internal
-       - default
   api:
     image: docker.io/0x3654/gisp-api:latest
     container_name: gisp_api
@@ -66,35 +65,25 @@ services:
     container_name: gisp_import
     labels:
       - com.centurylinklabs.watchtower.enable=true
+    profiles:
+      - tasks
     env_file: .env
     environment:
-      - TZ=${TZ:-Europe/Moscow}  # Container timezone (cron uses this for schedule)
+      - TZ=${TZ:-Europe/Moscow}
       - POSTGRES_HOST=postgres_registry
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      # Cron schedule format: minute hour day month dow (uses $TZ above)
-      - CRON_IMPORT_SCHEDULE=${CRON_IMPORT_SCHEDULE:-5 0 * * *}  # Daily at 00:05 Moscow time
-      - CRON_MAINTENANCE_SCHEDULE=${CRON_MAINTENANCE_SCHEDULE:-0 5 * * *}  # Daily at 05:00 Moscow time
     volumes:
       - ./logs:/var/log/registry
       # Code is in image (moved to /src/import/)
-      - ./files:/files:cached
+      - ./files:/files:ro  # Read-only - import только читает, downloader пишет
     depends_on:
       postgres_registry:
         condition: service_healthy
       semantic:
         condition: service_healthy
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - pg_isready -h postgres_registry -U ${POSTGRES_USER:-postgres} && pidof crond >/dev/null
-      interval: 60s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    restart: unless-stopped
+    restart: "no"  # Run-once like downloader
     networks:
       - internal
-      - default
   openwebui:
     image: ghcr.io/open-webui/open-webui
     container_name: gisp_openwebui
@@ -121,7 +110,34 @@ services:
     restart: unless-stopped
     networks:
       - internal
-      - default
+      - external
+  downloader:
+    image: docker.io/0x3654/gisp-downloader:latest
+    container_name: gisp_downloader
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+    profiles:
+      - tasks
+    env_file: .env
+    environment:
+      - TZ=${TZ:-Europe/Moscow}
+      - FILES_DIR=/files
+      - MAX_CSV_FILES=${MAX_CSV_FILES:-7}
+      # Download method: direct (для проды в РФ) или ssh-tunnel (для разработки вне РФ)
+      - DOWNLOAD_METHOD=${DOWNLOAD_METHOD:-direct}
+      # SSH tunnel settings (только для DOWNLOAD_METHOD=ssh-tunnel)
+      - SSH_HOST=${DOWNLOADER_SSH_HOST:-}
+      - SSH_PORT=${DOWNLOADER_SSH_PORT:-22}
+      - SSH_USER=${DOWNLOADER_SSH_USER:-}
+      - SSH_IDENTITY_FILE=/ssh_key
+    volumes:
+      - ./files:/files
+      - ${DOWNLOADER_SSH_KEY:-}:/ssh_key:ro
+    # Важно: SSH ключ всегда монтируется в /ssh_key внутри контейнера
+    # external network (не internal: true) — downloader нужен интернет, БД не нужна
+    networks:
+      - external
+    restart: "no"
   openwebui-sync:
     image: docker.io/0x3654/gisp-openwebui-sync:latest
     container_name: gisp_openwebui-sync
@@ -152,7 +168,7 @@ services:
   # - ARM64 PyTorch: ~2.46GB, 104-186ms
   semantic:
     image: docker.io/0x3654/gisp-semantic-onnx:latest
-    container_name: gisp_semantic_service
+    container_name: gisp_semantic
     labels:
       - com.centurylinklabs.watchtower.enable=true
     env_file: .env
@@ -199,14 +215,13 @@ services:
       - internal
   embeddings-worker:
     image: docker.io/0x3654/gisp-semantic-onnx:latest
+    #container_name: gisp_embeddings-worker
     labels:
       - com.centurylinklabs.watchtower.enable=true
     profiles:
       - embeddings
     env_file: .env
     working_dir: /app
-    volumes:
-      - .:/app
     depends_on:
       - postgres_registry
       - semantic
@@ -219,14 +234,10 @@ services:
       SOURCE_FILES: ${SOURCE_FILES:-}
       EMBED_IDS: ${EMBED_IDS:-}
       LIMIT: ${LIMIT:-}
-      EXTRA_EMBED_ARGS: ${EXTRA_EMBED_ARGS:-}
-      SEMANTIC_URL_OVERRIDE: ${SEMANTIC_URL_OVERRIDE:-}
       SHARD_INDEX: "0"
       SHARD_COUNT: "1"
       BATCH_SIZE: "200"
-    command: >
-      bash -lc "set -e;
-      ./src/import/scripts/run_embeddings_worker.sh"
+    command: ["python3", "/app/update_embeddings.py"]
     deploy:
       restart_policy:
         condition: none
@@ -252,8 +263,10 @@ services:
     networks:
       - internal
 networks:
-   internal:
-     internal: true
-   default:
-    name: registry-net
+  internal:
+    internal: true
+    name: registry-internal
+    driver: bridge
+  external:
+    name: registry-external
     driver: bridge

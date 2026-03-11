@@ -7,48 +7,42 @@
 # ===================================
 FROM python:3.12-slim AS builder
 
-# Build arguments
 ARG VERSION=2.2
-ARG HF_TOKEN
-ARG HF_MODEL_ID="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-ARG ONNX_HF_MODEL_ID="onnx-models/paraphrase-multilingual-MiniLM-L12-v2-onnx"
 
-# Install build-time system dependencies (including psycopg2 build deps)
+# Install build-time system dependencies (gcc for psycopg2 compilation)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
     libpq-dev \
     gcc \
     python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install ONNX Runtime and transformers (includes compatible tokenizers)
-# Note: We need transformers for compatible tokenizer, huggingface_hub removed from runtime
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir --target=/install \
-        "onnxruntime==1.23.2" \
-        "transformers==4.48.0" \
-    && rm -rf /root/.cache/pip
+# Create virtual environment
+RUN python -m venv /venv
 
-# Install sentence-transformers with --no-deps (compatibility layer only)
-RUN pip install --no-cache-dir --target=/install \
-    sentence-transformers==3.0.1 --no-deps \
-    && rm -rf /root/.cache/pip
+# Install ONNX Runtime and transformers (compatible tokenizers)
+RUN /venv/bin/pip install --no-cache-dir \
+    "onnxruntime==1.23.2" \
+    "transformers==4.48.0"
 
-# Install remaining dependencies
-# Note: huggingface_hub is only needed in model-downloader stage, not runtime
-# Note: transliterate removed (not used in code)
-# Note: pymorphy3 for Python 3.12 compatibility (instead of pymorphy2)
-# Note: setuptools<74 required for pymorphy3 (pkg_resources was removed in later versions)
-RUN pip install --no-cache-dir --target=/install \
+# Install sentence-transformers with --no-deps (avoids pulling torch as a dependency)
+RUN /venv/bin/pip install --no-cache-dir \
+    sentence-transformers==3.0.1 --no-deps
+
+# Install remaining runtime dependencies
+# Notes:
+#   huggingface_hub  — only needed in model-downloader stage, NOT here
+#   transliterate    — removed (not used in code)
+#   pymorphy3        — Python 3.12 compatible replacement for pymorphy2
+#   setuptools<75    — required by pymorphy3 (uses pkg_resources)
+RUN /venv/bin/pip install --no-cache-dir \
     fastapi==0.115.6 \
-    uvicorn[standard]==0.34.0 \
+    "uvicorn[standard]==0.34.0" \
     pymorphy3==1.2.1 \
     nltk==3.9.1 \
     requests==2.32.3 \
     psycopg2==2.9.10 \
     "numpy<2.0" \
-    "setuptools<75" \
-    && rm -rf /root/.cache/pip
+    "setuptools<75"
 
 # ===================================
 # MODEL DOWNLOADER STAGE - Download ONNX model
@@ -59,19 +53,17 @@ ARG HF_TOKEN
 ARG ONNX_HF_MODEL_ID="onnx-models/paraphrase-multilingual-MiniLM-L12-v2-onnx"
 ARG HF_ENDPOINT="https://huggingface.co"
 
-# Environment for model download
 ENV ONNX_HF_MODEL_ID=${ONNX_HF_MODEL_ID} \
     HF_ENDPOINT=${HF_ENDPOINT} \
     MODEL_DIR=/models
 
-# Install minimal runtime for download
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
+# Minimal install: just curl for apt-get cleanup, then huggingface_hub for snapshot_download
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir "huggingface_hub==0.23.2"
 
-# Download ONNX model at build time using HF token from CI/CD
-# ONNX model already includes pooling layer
+# Download ONNX model at build time
+# HF token provided via BuildKit secret (not baked into any layer)
 RUN --mount=type=secret,id=hf_token,target=/tmp/hf_token \
     python - <<'PY' && rm -rf /root/.cache/huggingface /tmp/* ~/.cache
 import os
@@ -82,36 +74,30 @@ for offline_var in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"):
 
 from huggingface_hub import snapshot_download
 
-repo_id = os.environ.get("ONNX_HF_MODEL_ID")
-target = os.environ.get("MODEL_DIR", "/models")
-token_file = Path("/tmp/hf_token")
-token = None
+repo_id = os.environ["ONNX_HF_MODEL_ID"]
+target  = os.environ.get("MODEL_DIR", "/models")
 
-if token_file.is_file():
-    token = token_file.read_text().strip() or None
-elif os.environ.get("HF_TOKEN"):
-    token = os.environ.get("HF_TOKEN")
+token_file = Path("/tmp/hf_token")
+token = (token_file.read_text().strip() or None) if token_file.is_file() else os.getenv("HF_TOKEN")
 endpoint = os.environ.get("HF_ENDPOINT") or None
 
-# Download ONNX model files only
-allow_patterns = [
-    "README.md",
-    "config.json",
-    "config_sentence_transformers.json",
-    "modules.json",
-    "sentence_bert_config.json",
-    "special_tokens_map.json",
-    "tokenizer.json",
-    "tokenizer_config.json",
-    "vocab.txt",
-    "unigram.json",
-    "model.onnx",  # ONNX model with Transformer+Pooling
-]
-
+# Download ONNX model files only (no PyTorch weights)
 snapshot_download(
     repo_id=repo_id,
     local_dir=target,
-    allow_patterns=allow_patterns,
+    allow_patterns=[
+        "README.md",
+        "config.json",
+        "config_sentence_transformers.json",
+        "modules.json",
+        "sentence_bert_config.json",
+        "special_tokens_map.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "vocab.txt",
+        "unigram.json",
+        "model.onnx",  # ONNX model with Transformer+Pooling fused
+    ],
     token=token,
     endpoint=endpoint,
 )
@@ -127,19 +113,19 @@ ARG HF_MODEL_ID="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 ARG HF_ENDPOINT="https://huggingface.co"
 
 # Metadata labels
-LABEL maintainer="gisp-team"
-LABEL service="semantic"
+LABEL maintainer="0x3654"
+LABEL service="gisp_semantic-onnx"
 LABEL version=$VERSION
-LABEL runtime="onnxruntime" \
-        runtime.version="1.23.2"
+LABEL runtime="onnxruntime"
+LABEL runtime.version="1.23.2"
 LABEL org.opencontainers.image.source="https://github.com/0x3654/gisp"
 
 # Environment variables
+# PATH includes /venv/bin so uvicorn/python from venv are used automatically
 ENV TZ=Europe/Moscow \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PATH="/venv/bin:$PATH" \
     USE_ONNX=true \
     HF_MODEL_ID=${HF_MODEL_ID} \
     HF_ENDPOINT=${HF_ENDPOINT} \
@@ -149,29 +135,34 @@ ENV TZ=Europe/Moscow \
 # Set working directory
 WORKDIR /app
 
-# Install runtime system dependencies (no build tools!)
+# Runtime system dependencies:
+#   libpq5 — required by psycopg2 at runtime (no gcc, no libpq-dev)
+# User created HERE — before any COPY --chown so the uid/gid already exists
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
     libpq5 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -g 10001 appuser \
+    && useradd -u 10001 -g appuser -s /sbin/nologin -d /app appuser
 
-# Copy Python packages from /install directory (much smaller than all site-packages)
-COPY --from=builder --chown=appuser:appuser /install /usr/local/lib/python3.12/site-packages
+# Copy virtual environment from builder
+COPY --from=builder /venv /venv
 
-# Copy models from model-downloader (with ownership)
+# Copy models from model-downloader
 COPY --from=model-downloader --chown=appuser:appuser /models /app/model
 
-# Copy application code (with ownership)
+# Copy application code and embeddings-worker script
 COPY --chown=appuser:appuser ./src/semantic /app
-
-# Add non-root user
-RUN groupadd -g 10001 appuser && useradd -u 10001 -g appuser appuser
+COPY --chown=appuser:appuser ./src/import/scripts/update_embeddings.py /app/update_embeddings.py
 
 # Expose port
 EXPOSE 8010
 
+# Healthcheck: socket connect is enough — avoids curl dependency
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD python -c "import socket, os; s=socket.socket(); s.connect(('127.0.0.1', int(os.getenv('SEMANTIC_PORT','8010')))); s.close()"
+
 # Run as non-root user
 USER appuser
 
-# Run application
-CMD ["python", "-m", "uvicorn", "semantic_service:app", "--host", "0.0.0.0", "--port", "8010"]
+# Run application (uvicorn is on PATH via /venv/bin)
+CMD ["uvicorn", "semantic_service:app", "--host", "0.0.0.0", "--port", "8010"]
