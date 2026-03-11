@@ -268,4 +268,3 @@ networks:
   external:
     name: registry-external
     driver: bridge
-1
