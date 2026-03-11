@@ -170,7 +170,7 @@ services:
     image: docker.io/0x3654/gisp-semantic-onnx:latest
     container_name: gisp_semantic
     labels:
-      - com.centurylinklabs.watchtower.enable=false
+      - com.centurylinklabs.watchtower.enable=true
     env_file: .env
     environment:
       - PYTHONPATH=/app
@@ -217,7 +217,7 @@ services:
     image: docker.io/0x3654/gisp-semantic-onnx:latest
     #container_name: gisp_embeddings-worker
     labels:
-      - com.centurylinklabs.watchtower.enable=false
+      - com.centurylinklabs.watchtower.enable=true
     profiles:
       - embeddings
     env_file: .env
