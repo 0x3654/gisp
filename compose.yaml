@@ -132,7 +132,7 @@ services:
       - SSH_IDENTITY_FILE=/ssh_key
     volumes:
       - ./files:/files
-      - ${DOWNLOADER_SSH_KEY:-}:/ssh_key:ro
+      - ${DOWNLOADER_SSH_KEY:-/dev/null}:/ssh_key:ro
     # Важно: SSH ключ всегда монтируется в /ssh_key внутри контейнера
     # external network (не internal: true) — downloader нужен интернет, БД не нужна
     networks:
