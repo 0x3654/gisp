@@ -236,6 +236,8 @@ services:
       SHARD_COUNT: "1"
       BATCH_SIZE: "200"
     command: ["python3", "/app/update_embeddings.py"]
+    healthcheck:
+      disable: true
     deploy:
       restart_policy:
         condition: none
