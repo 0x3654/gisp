@@ -61,8 +61,12 @@ jobs:
 
       - name: Make repository public
         run: |
-          curl -X PATCH \
-            -H "Authorization: Bearer ${{ secrets.DOCKERHUB_TOKEN }}" \
+          HUB_JWT=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -d "{\"username\":\"${{ secrets.DOCKERHUB_USERNAME }}\",\"password\":\"${{ secrets.DOCKERHUB_TOKEN }}\"}" \
+            https://hub.docker.com/v2/users/login/ | jq -r '.token')
+          curl -f -X PATCH \
+            -H "Authorization: JWT ${HUB_JWT}" \
             -H "Content-Type: application/json" \
             -d '{"is_private": false}' \
-            https://hub.docker.com/v2/repositories/${{ secrets.DOCKERHUB_USERNAME }}/gisp-starter/ || true
+            https://hub.docker.com/v2/repositories/${{ secrets.DOCKERHUB_USERNAME }}/gisp-starter/
