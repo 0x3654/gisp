@@ -89,11 +89,11 @@ if [[ "$AUTO_EMBED" != "1" ]]; then
   echo "[INFO] Автообновление эмбеддингов отключено (AUTO_EMBED=$AUTO_EMBED)"
 fi
 
-  if ! /scripts/import_all.sh "$FILES_DIR"; then
+  /scripts/import_all.sh "$FILES_DIR" || {
     cmd_status=$?
     record_failure "$cmd_status"
     echo "[ERROR] Ошибка импорта ($cmd_status)"
-  fi
+  }
 
   if [[ $status -eq 0 ]]; then
     echo -e "\n🔥 Удаляем старые файлы логов"

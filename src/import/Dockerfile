@@ -41,9 +41,10 @@ ENV TZ=UTC \
 # Set working directory
 WORKDIR /app
 
-# Runtime: libpq for psycopg2, bash for shell scripts, curl for healthchecks in scripts
+# Runtime: libpq for psycopg2, postgresql-client for psql CLI, bash for shell scripts
 RUN apk add --no-cache \
     libpq \
+    postgresql-client \
     bash \
     curl \
     ca-certificates \
