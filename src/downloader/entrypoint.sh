@@ -8,8 +8,17 @@ set -euo pipefail
 : "${SSH_HOST:=}"
 : "${SSH_PORT:=22}"
 : "${SSH_USER:=}"
+: "${SSH_KEY_B64:=}"
 : "${SSH_IDENTITY_FILE:=}"
 : "${SOCKS_PORT:=1080}"
+
+# If SSH key is provided as base64, decode it to a temp file
+if [[ "$DOWNLOAD_METHOD" == "ssh-tunnel" && -n "$SSH_KEY_B64" ]]; then
+  _tmp_key=$(mktemp)
+  printf '%s' "$SSH_KEY_B64" | base64 -d > "$_tmp_key"
+  chmod 600 "$_tmp_key"
+  SSH_IDENTITY_FILE="$_tmp_key"
+fi
 
 # Export environment for Python scripts
 export FILES_DIR MAX_CSV_FILES TZ DOWNLOAD_METHOD SSH_HOST SSH_PORT SSH_USER SSH_IDENTITY_FILE SOCKS_PORT

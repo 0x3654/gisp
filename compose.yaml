@@ -129,11 +129,9 @@ services:
       - SSH_HOST=${DOWNLOADER_SSH_HOST:-}
       - SSH_PORT=${DOWNLOADER_SSH_PORT:-22}
       - SSH_USER=${DOWNLOADER_SSH_USER:-}
-      - SSH_IDENTITY_FILE=/ssh_key
+      - SSH_KEY_B64=${DOWNLOADER_SSH_KEY_B64:-}
     volumes:
       - ./files:/files
-      - ${DOWNLOADER_SSH_KEY:-/dev/null}:/ssh_key:ro
-    # Важно: SSH ключ всегда монтируется в /ssh_key внутри контейнера
     # external network (не internal: true) — downloader нужен интернет, БД не нужна
     networks:
       - external
@@ -270,3 +268,4 @@ networks:
   external:
     name: registry-external
     driver: bridge
+1
