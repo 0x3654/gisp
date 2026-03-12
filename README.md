@@ -269,6 +269,8 @@ docker compose --profile tasks run --rm downloader
 docker compose --profile tasks run --rm import
 ```
 
+> **macOS + Docker Desktop:** Если задачи запускаются из неинтерактивной SSH-сессии (например, из Semaphore, работающего в Docker-контейнере), `--pull always` может упасть с ошибкой `keychain cannot be accessed because the current session does not allow user interaction`. Причина — `credsStore: osxkeychain` в `~/.docker/config.json`. Решение: удалить строку `"credsStore": "osxkeychain"` из этого файла. Docker Desktop продолжит работать нормально (контекст `desktop-linux` сохраняется), а анонимный pull публичных образов заработает без обращения к Keychain.
+
 
 # I. **FastAPI Web API**
 <details>
