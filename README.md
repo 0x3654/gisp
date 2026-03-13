@@ -55,6 +55,13 @@ curl -fsSL https://raw.githubusercontent.com/0x3654/gisp/master/scripts/bootstra
 
 Semaphore хранит расписание и секреты. downloader запускается по крону, по завершении сам триггерит import и embeddings через Semaphore API — без фиксированных временных окон между шагами.
 
+**Что нужно настроить в Semaphore:**
+
+**Variable Group** (общая для всех шаблонов) — добавить переменную окружения:
+- `semaphore_api_token` — API токен Semaphore (Settings → API Tokens)
+
+Имена следующих шаблонов (`semaphore_next_template_name`) заданы по умолчанию прямо в плейбуках — дополнительно ничего настраивать не нужно. Dev-шаблоны работают по расписанию независимо.
+
 # **Установка**
 
 1. Клонируйте репозиторий:
