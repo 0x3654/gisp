@@ -57,10 +57,8 @@ Semaphore хранит расписание и секреты. downloader зап
 
 **Что нужно настроить в Semaphore:**
 
-**Variable Group** (общая для всех шаблонов) — добавить переменную окружения:
-- `semaphore_api_token` — API токен Semaphore (Settings → API Tokens)
-
-Имена следующих шаблонов (`semaphore_next_template_name`) заданы по умолчанию прямо в плейбуках — дополнительно ничего настраивать не нужно. Dev-шаблоны работают по расписанию независимо.
+В **Variable Group** → вкладка **Variables** → секция **Extra variables** добавить:
+- `semaphore_api_token` — API токен Semaphore (Settings → API Tokens → New Token)
 
 # **Установка**
 
