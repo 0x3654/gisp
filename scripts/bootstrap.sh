@@ -4,9 +4,6 @@ set -euo pipefail
 
 REPO_URL="https://github.com/0x3654/gisp.git"
 TARGET_DIR="${GISP_TARGET_DIR:-gisp}"
-# Long-running services only — task containers (import, downloader, embeddings-worker)
-# are managed by Ansible/Semaphore and must NOT be started here.
-SERVICES=("postgres_registry" "api" "semantic" "openwebui")
 
 info() { printf "==> %s\n" "$*"; }
 warn() { printf "⚠️  %s\n" "$*" >&2; }
@@ -106,9 +103,9 @@ else
 fi
 
 # ── Start services ─────────────────────────────────────────────────────────────
-info "Pulling and starting services: ${SERVICES[*]}"
-sudo docker compose pull "${SERVICES[@]}"
-sudo docker compose up -d "${SERVICES[@]}"
+info "Pulling and starting services"
+sudo docker compose pull
+sudo docker compose up -d
 
 cat <<'EOF'
 

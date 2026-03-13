@@ -1,15 +1,15 @@
 # **ГИСП реестр, API и Чат для поиска**
 
-[![API](https://github.com/0x3654/gisp/actions/workflows/build-api-image.yml/badge.svg)](https://github.com/0x3654/gisp/actions/workflows/build-api-image.yml)
-[![Import](https://github.com/0x3654/gisp/actions/workflows/build-import-image.yml/badge.svg)](https://github.com/0x3654/gisp/actions/workflows/build-import-image.yml)
-[![Semantic](https://github.com/0x3654/gisp/actions/workflows/build-semantic-image.yml/badge.svg)](https://github.com/0x3654/gisp/actions/workflows/build-semantic-image.yml)
-[![OpenWebUI](https://github.com/0x3654/gisp/actions/workflows/build-openwebui-sync-image.yml/badge.svg)](https://github.com/0x3654/gisp/actions/workflows/build-openwebui-sync-image.yml)
-[![Starter](https://github.com/0x3654/gisp/actions/workflows/build-starter-image.yml/badge.svg)](https://github.com/0x3654/gisp/actions/workflows/build-starter-image.yml)
+[API](https://github.com/0x3654/gisp/actions/workflows/build-api-image.yml)
+[Import](https://github.com/0x3654/gisp/actions/workflows/build-import-image.yml)
+[Semantic](https://github.com/0x3654/gisp/actions/workflows/build-semantic-image.yml)
+[OpenWebUI](https://github.com/0x3654/gisp/actions/workflows/build-openwebui-sync-image.yml)
+[Starter](https://github.com/0x3654/gisp/actions/workflows/build-starter-image.yml)
 
-[![Docker Hub](https://img.shields.io/badge/docker-0x3654-blue?logo=docker)](https://hub.docker.com/u/0x3654)
-[![License: WTFPL](https://img.shields.io/badge/License-WTFPL-blue?logo=unlicense)](http://www.wtfpl.net/about/)
-[![multi-arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-green)](https://github.com/0x3654/gisp/pkgs/container/gisp-api)
-[![Last commit](https://img.shields.io/github/last-commit/0x3654/gisp)](https://github.com/0x3654/gisp/commits/master)
+[Docker Hub](https://hub.docker.com/u/0x3654)
+[License: WTFPL](http://www.wtfpl.net/about/)
+[multi-arch](https://github.com/0x3654/gisp/pkgs/container/gisp-api)
+[Last commit](https://github.com/0x3654/gisp/commits/master)
 
 Поиск по реестру российской промышленной продукции Минпромторга в формате чата с автоматическим обновлением данных и возможностью интеграции с api.
 
@@ -19,13 +19,10 @@
 
 Вы получаете поиск двумя способами: строгие фильтры по параметрам и семантический режим поиска по наименованию с расширением синонимами — по умолчанию чат комбинирует оба источника и выводит результаты в едином списке. Подробности выбора режима описаны в разделе [Описание параметров в чате](#описание-параметров-в-чате).
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/chat-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/chat-light.png">
-  <img alt="Скриншот поиска в чате" src="docs/chat-light.png">
-</picture>
+
 
 **Требования**
+
 - Docker Engine + Docker Compose Plugin (версия 2.20+) и Git, Ubuntu 20/Debian 12 и новее:
   ```bash
   sudo apt update
@@ -42,62 +39,68 @@
 curl -fsSL https://raw.githubusercontent.com/0x3654/gisp/master/scripts/bootstrap.sh | bash
 ```
 
-Скрипт установит Docker/Compose/Git, клонирует репозиторий, подготовит конфиги, загрузит стартовый дамп через `starter-dump` и запустит контейнеры `postgres_registry`, `api`, `semantic`, `openwebui`. После завершения откройте http://localhost:3333 admin@gisp.ru 123
+Скрипт установит Docker/Compose/Git, клонирует репозиторий, подготовит конфиги, загрузит стартовый дамп через `starter-dump` и запустит контейнеры `postgres_registry`, `api`, `semantic`, `openwebui`. После завершения откройте [http://localhost:3333](http://localhost:3333) [admin@gisp.ru](mailto:admin@gisp.ru) 123
 
 Для обновления данных используйте Ansible playbooks или Semaphore (см. раздел "Сетевая изоляция").
 
-**Примечание:** Для продакшен деплоя и управления рекомендуем использовать Ansible роль: [0x3654/ansible](https://github.com/0x3654/ansible/tree/main/roles/gisp)
+**Примечание:** Для продакшен деплоя и управления рекомендую использовать Ansible роль: [0x3654/ansible](https://github.com/0x3654/ansible/tree/main/roles/gisp)
+
+### Рекомендуемая схема управления
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/scheme-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/scheme-light.png">
+  <img alt="Схема управления" src="docs/scheme-light.png">
+</picture>
+
+Semaphore хранит расписание и секреты. downloader запускается по крону, по завершении сам триггерит import и embeddings через Semaphore API — без фиксированных временных окон между шагами.
 
 # **Установка**
 
 1. Клонируйте репозиторий:
-   ```bash
+  ```bash
    git clone https://github.com/0x3654/gisp.git
    cd gisp
-   ```
+  ```
 2. Создайте локальные конфиги из примеров:
-   ```bash
+  ```bash
    cp .env.example .env
    cp services/semantic/synonyms.example.json services/semantic/synonyms.json
-   ```
+  ```
 3. Заполните `.env` реальными значениями:
-   - `REGISTRY_NODE_NAME` — подпись сервера в уведомлениях (если не задать, будет короткий ID контейнера).
-   - `BOT_TOKEN`/`CHAT_ID` — опциональные параметры для уведомлений Telegram.
-   - Остальные параметры можно оставить как есть:
-     - `POSTGRES_*` — креды PostgreSQL (используются API, импортером и воркерами).
-     - `FILES_DIR`, `LOG_DIR`, `MAX_*` — каталоги и политики очистки для контейнера `import`.
-     - `SEMANTIC_CACHE_TTL_SECONDS` — сколько хранить кэш запросов семантического сервиса (по умолчанию 7 суток в секундах).
-
+  - `REGISTRY_NODE_NAME` — подпись сервера в уведомлениях (если не задать, будет короткий ID контейнера).
+  - `BOT_TOKEN`/`CHAT_ID` — опциональные параметры для уведомлений Telegram.
+  - Остальные параметры можно оставить как есть:
+    - `POSTGRES_*` — креды PostgreSQL (используются API, импортером и воркерами).
+    - `FILES_DIR`, `LOG_DIR`, `MAX_*` — каталоги и политики очистки для контейнера `import`.
+    - `SEMANTIC_CACHE_TTL_SECONDS` — сколько хранить кэш запросов семантического сервиса (по умолчанию 7 суток в секундах).
 4. *(опционально)* Отредактируйте `services/semantic/synonyms.json`, добавив свои пары «термин → список синонимов»:
-   ```json
+  ```json
    {
      "сода": [
        "гидрокарбонат натрия",
        "пищевая сода"
      ]
    }
-   ```
+  ```
 5. *(опционально)* Подготовьте шаблон БД для OpenWebUI:
-   ```bash
+  ```bash
    mkdir -p services/openwebui/data
    cp services/openwebui/webui.db.example services/openwebui/data/webui.db
-   ```
-
+  ```
     Users:
-    - admin@gisp.ru 123
-    - gisp@gisp.ru 123
-
+  - [admin@gisp.ru](mailto:admin@gisp.ru) 123
+  - [gisp@gisp.ru](mailto:gisp@gisp.ru) 123
 6. *(опционально)* Загрузите стартовый дамп через `starter-dump`:
-   ```bash
+  ```bash
    COMPOSE_PROFILES=starter docker compose run -T --rm starter-dump
-   ```
-   Загрузит ~531K записей реестра + векторные эмбеддинги (~902MB сжато; на дату: 06.02.2025).
-
+  ```
+   Загрузит ~~531K записей реестра + векторные эмбеддинги (~~902MB сжато; на дату: 06.02.2025).
 7. Запустите стек:
-   ```bash
-   docker compose pull                              # Подтянуть последние образы из Docker Hub
-   docker compose up -d postgres_registry api semantic openwebui
-   ```
+  ```bash
+   docker compose pull
+   docker compose up -d
+  ```
    **Примечание:** Сервисы `downloader` и `import` находятся в профиле `tasks` и запускаются по требованию через Semaphore/Ansible для обновления данных.
 
 # **Структура проекта**
@@ -125,12 +128,14 @@ scripts/
 ```
 
 **Ключевые особенности архитектуры:**
+
 - **Исходный код** в `/src/` (Git tracked) — Dockerfiles и Python код
 - **Runtime данные** в `/services/` — данные БД, кэши, конфиги
 - **Pre-built образы** — собираются через GitHub Actions CI/CD
 - **Multi-arch** поддержка — linux/amd64 и linux/arm64
 
 **CI/CD workflows:**
+
 - `build-api-image.yml` → `gisp-api:latest`
 - `build-downloader-image.yml` → `gisp-downloader:latest`
 - `build-import-image.yml` → `gisp-import:latest`
@@ -139,33 +144,34 @@ scripts/
 - `build-starter-image.yml` → `gisp-starter:latest`
 
 
-<!-- Схема обработки сообщений и взаимодействия с API (Excalidraw): см. файл docs/workflow.excalidraw -->
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/scheme-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/scheme-light.png">
-  <img alt="Схема сервисов" src="docs/scheme-light.png">
-</picture>
+
 
 > ## **Контейнер gisp_pg**
+>
 > PostgreSQL с расширением pgvector. Хранит:
+>
 > - `registry.reestr` — нормализованные записи реестра (полный набор полей Минпромторга);
 > - `registry.load_log` — журнал загрузок CSV;
 > - `registry.semantic_items` — кэш эмбеддингов (reestr_id + вектор);
 > - `registry.semantic_query_cache` — кэш запросов чата за последние 7 дней (парамертр `SEMANTIC_CACHE_TTL_SECONDS`).
 
 > ## **Контейнер gisp_api**
+>
 > FastAPI-шлюз для REST-запросов и выдачи данных с обрабатывает запросы с фильтрами и семантические запросы.
 
 > ## **Контейнер gisp_import**
+>
 > Одноразовый импортёр: нормализует CSV и заливает данные в базу. Не имеет доступа к интернету. Работает в профиле `tasks`, запускается по расписанию через Semaphore/Ansible.
 >
 > **Запуск через Docker Compose:**
+>
 > ```bash
 > docker compose --profile tasks run --rm import
 > ```
 >
 > **Запуск через Ansible:**
+>
 > ```bash
 > ansible-playbook playbooks/gisp-downloader.yml  # Сначала скачать CSV
 > ansible-playbook playbooks/gisp-import.yml      # Затем импортировать
@@ -175,6 +181,7 @@ scripts/
 > Уведомления отправляются на уровне Ansible/Semaphore (контейнер не имеет доступа к интернету).
 
 > ## **Контейнер gisp_semantic**
+>
 > FastAPI-шлюз для REST-запросов строит эмбеддинги и расширяет запросы с учетом `synonyms.json`. В образ сразу добавлена модель `paraphrase-multilingual-MiniLM-L12-v2`.
 >
 > ### Выбор backend: ONNX vs PyTorch
@@ -182,60 +189,74 @@ scripts/
 > По умолчанию используется `gisp-semantic-onnx:latest` (ONNX Runtime) — оптимальный выбор для обеих архитектур.
 >
 > **Доступные образы:**
+>
 > - `gisp-semantic-onnx:latest` — ONNX Runtime (рекомендуется)
 > - `gisp-semantic-pytorch:latest` — PyTorch (альтернатива)
 >
 > **Бенчмарки Python 3.12 + pymorphy3:**
 >
-> | Архитектура | Backend | Размер | Скорость (средняя) |
-> |-------------|---------|--------|-------------------|
-> | AMD64 | ONNX | ~1.03 GB | 27-32ms ⚡ |
-> | AMD64 | PyTorch | ~1.93 GB | 28-35ms |
-> | ARM64 | ONNX | ~1.69 GB | 37-44ms ✅ |
-> | ARM64 | PyTorch | ~2.46 GB | 104-186ms 🐌 |
+>
+> | Архитектура | Backend | Размер   | Скорость (средняя) |
+> | ----------- | ------- | -------- | ------------------ |
+> | AMD64       | ONNX    | ~1.03 GB | 27-32ms ⚡          |
+> | AMD64       | PyTorch | ~1.93 GB | 28-35ms            |
+> | ARM64       | ONNX    | ~1.69 GB | 37-44ms ✅          |
+> | ARM64       | PyTorch | ~2.46 GB | 104-186ms 🐌       |
+>
 >
 > **Рекомендации:**
+>
 > - **AMD64 (Intel/AMD)**: ONNX на 87% компактнее при той же скорости
 > - **ARM64 (Apple Silicon)**: ONNX в 3+ раза быстрее и на 45% компактнее
 >
 > **Как переключиться на PyTorch:**
 > Измените `image` в `compose.yaml` для сервисов `semantic` и `embeddings-worker`:
+>
 > ```yaml
 > semantic:
 >   image: docker.io/0x3654/gisp-semantic-pytorch:latest
 > embeddings-worker:
 >   image: docker.io/0x3654/gisp-semantic-pytorch:latest
 > ```
+>
 > Затем перезапустите сервис:
+>
 > ```bash
 > docker compose up -d semantic
 > ```
 
 > ## **Контейнер embeddings-worker**
+>
 > Одноразовый воркер для массового пересчёта эмбеддингов. Стартует по команде `docker compose run --rm embeddings-worker`, поддерживает шардирование и форс-пересчёт через переменные окружения.
 
 > ## **Контейнер gisp_openwebui**
+>
 > WebUI для общения с системой в формате чата.
 
 > ## **Контейнер gisp_starter_dump**
+>
 > Одноразовый образ для первичной инициализации БД стартовым снепшотом.
 >
 > **Когда запускать:**
+>
 > - При первой установке на пустую БД
 > - Для восстановления данных после сбоя
 > - При обновлении до свежего снепшота
 >
 > **Запуск:**
+>
 > ```bash
 > COMPOSE_PROFILES=starter docker compose run -T --rm starter-dump
 > ```
 >
 > **Переменные окружения:**
+>
 > - `STARTER_FORCE=0` — (по умолчанию) пропустить восстановление если в `registry.reestr` есть данные
 > - `STARTER_FORCE=1` — принудительно перезаписать данные (используйте с осторожностью!)
 > - `STARTER_MAX_WAIT=180` — макс. время ожидания PostgreSQL (секунды)
 >
 > **Что содержит снепшот:**
+>
 > - ✅ `registry.reestr` — записи реестра (~531K строк, ~902MB сжато)
 > - ✅ `registry.semantic_items` — векторные эмбеддинги для семантического поиска
 >
@@ -245,21 +266,26 @@ scripts/
 
 Проект использует две сети Docker для обеспечения безопасности:
 
-| Сеть | Назначение | Доступ в интернет |
-|------|-----------|-------------------|
-| `registry-internal` | Внутренние сервисы (postgres, api, import, semantic) | ❌ Заблокирован |
-| `registry-external` | Внешний доступ (openwebui) | ✅ Разрешён |
+
+| Сеть                | Назначение                                           | Доступ в интернет |
+| ------------------- | ---------------------------------------------------- | ----------------- |
+| `registry-internal` | Внутренние сервисы (postgres, api, import, semantic) | ❌ Заблокирован    |
+| `registry-external` | Внешний доступ (openwebui)                           | ✅ Разрешён        |
+
 
 **Назначение сервисов по сетям:**
+
 - `postgres_registry`, `api`, `import`, `semantic` — только `internal` (без интернета)
 - `openwebui` — `internal` + `external` (единственная точка входа)
 - `downloader` — `network_mode: host` (SSH туннель для скачивания CSV)
 
 **Профили запуска:**
+
 - **По умолчанию**: `postgres_registry`, `api`, `semantic`, `openwebui`
-- **`tasks`**: `downloader`, `import` (запускаются по требованию)
+- `**tasks`**: `downloader`, `import` (запускаются по требованию)
 
 **Примеры запуска:**
+
 ```bash
 # Основные сервисы (вечный запуск)
 docker compose up -d
@@ -271,29 +297,30 @@ docker compose --profile tasks run --rm import
 
 > **macOS + Docker Desktop:** Если задачи запускаются из неинтерактивной SSH-сессии (например, из Semaphore, работающего в Docker-контейнере), `--pull always` может упасть с ошибкой `keychain cannot be accessed because the current session does not allow user interaction`. Причина — `credsStore: osxkeychain` в `~/.docker/config.json`. Решение: удалить строку `"credsStore": "osxkeychain"` из этого файла. Docker Desktop продолжит работать нормально (контекст `desktop-linux` сохраняется), а анонимный pull публичных образов заработает без обращения к Keychain.
 
-
 # I. **FastAPI Web API**
-<details>
-<summary><b>Описание:</b></summary>
-> ### Эндпоинт: GET `/reestr`
+
+**Описание:** > ### Эндпоинт: GET `/reestr`
 
 > Параметры запроса:
-> | Параметр      | Тип    | Описание                                                                 |
-> |---------------|--------|--------------------------------------------------------------------------|
-> | `inn`         | `str`  | ИНН организации|
-> | `tnved`       | `str`  | Код ТНВЭД|
-> | `okpd2`       | `str`  | Код ОКПД2                                                              |
-> | `productname` | `str`  | Наименование продукта, поддержка `$` для обязательных терминов и `^` для альтернативных |
-> | `regnumber`   | `str`  | Регистрационный номер, формат "244\4\2023"                            |
-> | `nameoforg`   | `str`  | Название организации.                                                   |
-> | `code`        | `str`  | Универсальный код, ищет и по ИНН, и по ТНВЭД                         |
-> | `limit`       | `int`  | Количество записей (по умолчанию 20, максимум 200 — регулируется `REESTR_*` в `.env`) |
-> | `offset`      | `int`  | Смещение (по умолчанию 0, неотрицательное)                             |
+>
+>
+> | Параметр      | Тип   | Описание                                                                                |
+> | ------------- | ----- | --------------------------------------------------------------------------------------- |
+> | `inn`         | `str` | ИНН организации                                                                         |
+> | `tnved`       | `str` | Код ТНВЭД                                                                               |
+> | `okpd2`       | `str` | Код ОКПД2                                                                               |
+> | `productname` | `str` | Наименование продукта, поддержка `$` для обязательных терминов и `^` для альтернативных |
+> | `regnumber`   | `str` | Регистрационный номер, формат "244\4\2023"                                              |
+> | `nameoforg`   | `str` | Название организации.                                                                   |
+> | `code`        | `str` | Универсальный код, ищет и по ИНН, и по ТНВЭД                                            |
+> | `limit`       | `int` | Количество записей (по умолчанию 20, максимум 200 — регулируется `REESTR_`* в `.env`)   |
+> | `offset`      | `int` | Смещение (по умолчанию 0, неотрицательное)                                              |
+>
 
-
- ---
+---
 
 > **Описание работы:**
+>
 > - Формирует SQL-запрос с фильтрами по переданным параметрам
 > - Параметр `code` ищется и по ИНН, и по ТНВЭД
 > - Параметр `productname` разбивается по `$` (все термины должны присутствовать) и `^` (любой из вариантов), каждая часть ищется через `ILIKE`
@@ -301,6 +328,7 @@ docker compose --profile tasks run --rm import
 > - Результат ограничивается параметрами `limit` и `offset`
 
 > **Возвращаемый JSON:**
+>
 > ```json
 > {
 >   "rows": [...],
@@ -310,23 +338,25 @@ docker compose --profile tasks run --rm import
 > }
 > ```
 
-
 ---
 
 > ### Эндпоинт: GET `/reestr/semantic`
 
 > Параметры запроса:
-> | Параметр    | Тип   | Описание |
-> |-------------|-------|----------|
-> | `text`      | `str` (**обязателен**) | Свободный запрос пользователя, тот же текст, что вводится в чат (`semantic|…`) |
-> | `limit`     | `int` | Количество записей (1–100, по умолчанию 10) |
-> | `offset`    | `int` | Смещение результата (>=0) |
-> | `inn` / `tnved` / `okpd2` / `regnumber` / `nameoforg` / `code` | как в `/reestr` | Дополнительные фильтры, применяются после семантического ранжирования |
-
+>
+>
+> | Параметр                                                       | Тип                    | Описание                                                                   |
+> | -------------------------------------------------------------- | ---------------------- | -------------------------------------------------------------------------- |
+> | `text`                                                         | `str` (**обязателен**) | Свободный запрос пользователя, тот же текст, что вводится в чат (`semantic |
+> | `limit`                                                        | `int`                  | Количество записей (1–100, по умолчанию 10)                                |
+> | `offset`                                                       | `int`                  | Смещение результата (>=0)                                                  |
+> | `inn` / `tnved` / `okpd2` / `regnumber` / `nameoforg` / `code` | как в `/reestr`        | Дополнительные фильтры, применяются после семантического ранжирования      |
+>
 
 ---
 
 > **Описание работы:**
+>
 > - API запрашивает embedding у контейнера `semantic`, где запрос очищается, нормализуется и расширяется синонимами из `services/semantic/synonyms.json`.
 > - Выполняется прогрессивный поиск по таблице `registry.semantic_items` с fallback-листом:
 >   - Начальное ограничение `limit*2`, затем (если результатов мало) лимит удваивается до 800 строк.
@@ -335,6 +365,7 @@ docker compose --profile tasks run --rm import
 > - Повторные запросы к одному и тому же тексту берут embedding из кэша PostgreSQL (`registry.semantic_query_cache`, TTL задаётся `SEMANTIC_CACHE_TTL_SECONDS`).
 
 > **Возвращаемый JSON (сокращённо):**
+>
 > ```json
 > {
 >   "rows": [
@@ -367,27 +398,28 @@ docker compose --profile tasks run --rm import
 >   }
 > }
 > ```
-</details>
+
+
 
 ---
 
 # II. Обработка сообщений в чате
-<details>
-<summary><b>Описание:</b></summary>
+
+**Описание:**
 
 > 1. **Получение текста**
->  - Метод [`pipe()`](#pipebody-dict) берёт список сообщений из `body["messages"]`
+>   Метод `[pipe()](#pipebody-dict)` берёт список сообщений из `body["messages"]`
 >   - Извлекается последнее сообщение пользователя с ролью `role="user"`
 >   - Текст сообщения сохраняется в переменную `text`
 
->2. **Определение флагов управления**
->   - Проверяется, включён ли `debug` ([`_extract_debug_flag`](#_extract_debug_flagtext)) — для вывода отладки
->   - Определяется `max_rows` ([`_extract_max_rows`](#_extract_max_rowstext)) — максимальное количество строк для вывода
->   - Из текста удаляются строки управления (`debug`, `max_rows`) через [`clean_control_params`](#clean_control_paramstext)
->   - Удаляются строки с ключевыми словами и ссылками через [`_strip_debug_lines`](#_strip_debug_lines)
+> 1. **Определение флагов управления**
+>   - Проверяется, включён ли `debug` (`[_extract_debug_flag](#_extract_debug_flagtext)`) — для вывода отладки
+>   - Определяется `max_rows` (`[_extract_max_rows](#_extract_max_rowstext)`) — максимальное количество строк для вывода
+>   - Из текста удаляются строки управления (`debug`, `max_rows`) через `[clean_control_params](#clean_control_paramstext)`
+>   - Удаляются строки с ключевыми словами и ссылками через `[_strip_debug_lines](#_strip_debug_lines)`
 
->3. **Извлечение явных параметров**
->   - Метод [`_extract_explicit`](#_extract_explicittext) ищет в тексте:
+> 1. **Извлечение явных параметров**
+>   - Метод `[_extract_explicit](#_extract_explicittext)` ищет в тексте:
 >     - `INN` (`инн`, `inn`)
 >     - `TNVED` (`tnved`, `тнвэд`, `тнвед`)
 >     - `OKPD2` (`okpd2`, `окпд2`)
@@ -395,11 +427,11 @@ docker compose --profile tasks run --rm import
 >     - Наименование продукта (`productname`, `товар`, `наименование`)
 >   - Найденные значения сразу добавляются в словарь `params`
 
->4. **Очистка текста**
+> 1. **Очистка текста**
 >   - Из текста удаляются все ключи из `ALL_KEYS` и их варианты (например, слова "инн", "tnved", "окпд2" и т.п.), чтобы они не попали в `productname`
 >   - `OKPD2` также вырезается из текста до формирования `productname`
 
->5. **Формирование параметров поиска**
+> 1. **Формирование параметров поиска**
 >   - Если явного `productname` нет — оставшийся текст после удаления ключей и чисел берётся как `productname`
 >   - Определяются кандидаты для:
 >     - `inn` — числа 10–12 цифр с проверкой контрольной суммы
@@ -408,21 +440,21 @@ docker compose --profile tasks run --rm import
 >   - Если найден только `INN` или только `TNVED` — создаётся `code` с удалением исходных `inn`/`tnved`
 >   - Итоговые параметры сохраняются в `params`, добавляются `max_rows` и флаг `debug`
 
->6. **Подготовка запроса к API** ([`_build_params_to_send`](#_build_params_to_sendparams))
+> 1. **Подготовка запроса к API** (`[_build_params_to_send](#_build_params_to_sendparams)`)
 >   - В `params_to_send` помещаются только найденные параметры: `code`, `inn`, `tnved`, `okpd2`, `productname`, `nameoforg`, `regnumber`
->   - Строки и списки объединяются через `|` ([`_prepare_param_value`](#_prepare_param_valuekey-val)) для передачи нескольких значений
+>   - Строки и списки объединяются через `|` (`[_prepare_param_value](#_prepare_param_valuekey-val)`) для передачи нескольких значений
 >   - Если есть `regnumber` — все остальные параметры отбрасываются (точный поиск по регномеру)
 
->7. **Отправка запроса и fallback**
+> 1. **Отправка запроса и fallback**
 >   - Первый запрос к API отправляется с текущими `params_to_send
 >   - Если ничего не найдено:
->     1. Если есть `code`, он считается как `TNVED`, и пробуются сокращения TNVED 10→8→6→4
->     2. Если есть `TNVED`, пробуются сокращения TNVED 8→6→4
->   - Все попытки и результаты сохраняются в `fallback_debug` для отображения в отладке
+>   1. Если есть `code`, он считается как `TNVED`, и пробуются сокращения TNVED 10→8→6→4
+>   2. Если есть `TNVED`, пробуются сокращения TNVED 8→6→4
+>     е попытки и результаты сохраняются в `fallback_debug` для отображения в отладке
 
->8. **Формирование ответа**
->   - Результат API нормализуется через [`_normalize_rows`](#_normalize_rowspayload) (список словарей и мета-информация)
->   - Таблица формируется через [`_format_table`](#_format_tablerows-meta-max_rows):
+> 1. **Формирование ответа**
+>   - Результат API нормализуется через `[_normalize_rows](#_normalize_rowspayload)` (список словарей и мета-информация)
+>   - Таблица формируется через `[_format_table](#_format_tablerows-meta-max_rows)`:
 >     - Заголовки столбцов переименовываются через `FIELD_RENAME`
 >     - Даты (`docdate`, `docvalidtill`) приводятся к формату `DD.MM.YYYY`
 >   - Если результатов нет — выводится сообщение:
@@ -432,50 +464,52 @@ docker compose --profile tasks run --rm import
 >     - Итоговыми параметрами запроса
 >   - Иначе возвращается только таблица с результатами
 
->9. **Дополнительные операции**
+> 1. **Дополнительные операции**
 >   - Разделение `productname`: `$` — логическое И, `^` — логическое ИЛИ
 >   - Проверка корректности ИНН
 >   - Нормализация регистрационных номеров
 >   - Очистка лишних символов и переносов из текста
-</details>
+
+
 
 # III. Chat Pipe (`reestr_sync.py`)
 
-<details>
-<summary><b>Описание:</b></summary>
+**Описание:**
 
->Класс `Pipe` обрабатывает текстовые сообщения и подготавливает параметры для API
+> Класс `Pipe` обрабатывает текстовые сообщения и подготавливает параметры для API
 
 ### Методы
 
 #### `_detect_data_type(text: str) -> dict`
->- Извлекает параметры: `inn`, `tnved`, `okpd2`, `regnumber`, `productname`, `code`
->- Распознаёт `OKPD2` до формирования `productname`
->- Если найден единичный 10-значный код — он считается `code`
->- Формирует итоговый словарь `params` с флагом `debug` и параметром `max_rows`
+
+> - Извлекает параметры: `inn`, `tnved`, `okpd2`, `regnumber`, `productname`, `code`
+> - Распознаёт `OKPD2` до формирования `productname`
+> - Если найден единичный 10-значный код — он считается `code`
+> - Формирует итоговый словарь `params` с флагом `debug` и параметром `max_rows`
 
 #### `pipe(body: dict)`
 
->- Основной метод обработки сообщений
->- Парсит текст пользователя
->- Выполняет запрос к API (`/reestr`)
->- Реализует fallback: преобразование `code` в `tnved` с сокращениями (10→8→6→4), а также сокращения TNVED (8→6→4)
->- Возвращает Markdown-таблицу с переименованными заголовками (`FIELD_RENAME`); при передаче `response_format: {type: json}` — JSON-объект
->- При включённом `debug` выводит все попытки fallback и параметры запроса
->- Команда `semantic|…` (или `сима`) — семантический поиск через `/reestr/semantic`:
->  - текст кодируется «как есть», затем расширяется синонимами (например, «сода пищевая» → «гидрокарбонат натрия») из `services/semantic/synonyms.json`;
->  - результаты ранжируются по количеству совпавших токенов и косинусной дистанции;
->  - строки без совпадений по токенам отбрасываются для предсказуемой выдачи.
->- Команда `сравни` с несколькими вариантами использует `/batch_compare` для ранжирования кандидатов по косинусной дистанции за один запрос.
+> - Основной метод обработки сообщений
+> - Парсит текст пользователя
+> - Выполняет запрос к API (`/reestr`)
+> - Реализует fallback: преобразование `code` в `tnved` с сокращениями (10→8→6→4), а также сокращения TNVED (8→6→4)
+> - Возвращает Markdown-таблицу с переименованными заголовками (`FIELD_RENAME`); при передаче `response_format: {type: json}` — JSON-объект
+> - При включённом `debug` выводит все попытки fallback и параметры запроса
+> - Команда `semantic|…` (или `сима`) — семантический поиск через `/reestr/semantic`:
+> - текст кодируется «как есть», затем расширяется синонимами (например, «сода пищевая» → «гидрокарбонат натрия») из `services/semantic/synonyms.json`;
+> - результаты ранжируются по количеству совпавших токенов и косинусной дистанции;
+> - строки без совпадений по токенам отбрасываются для предсказуемой выдачи.
+> - Команда `сравни` с несколькими вариантами использует `/batch_compare` для ранжирования кандидатов по косинусной дистанции за один запрос.
 >  Используется лёгкая лингвистическая модель на CPU — ответы приходят быстро, без участия LLM и без требований к GPU.
 
-</details>
+
 
 ### Описание параметров в чате
 
 По умолчанию Pipe сначала строит фильтры и обращается к `/reestr`; семантика подключается только если остаётся «лишний» текст или если пользователь явно набрал `semantic|`.
 
 **Чтобы выполнить запрос с строгим соответствием:**
+
 - задавайте параметры в явном виде (каждая пара "параметр: значение" на новой строке или через пробел):
   - `inn:` / `инн:`
   - `tnved:` / `тнвед:` / `тнвэд:` / `тн вэд:`
@@ -488,21 +522,21 @@ docker compose --profile tasks run --rm import
   - `сравни` — отдельный режим семантического сравнения; работает в двух вариантах:
     - две строки: `сравни\nстрока1\nстрока2` — вернёт дистанцию и нормализацию обеих строк;
     - одна строка + список вариантов: первая строка после команды считается «исходной», остальные — кандидаты; Pipe подберёт наиболее похожий вариант из списка, отсортирует остальные по сходству и выведет таблицу с дистанциями и нормализованными значениями. По умолчанию показывается топ‑10, но можно добавить `max: 20` (или другое значение до 1000), чтобы увидеть больше или всю таблицу. Флаги `--debug`/`--nodebug` также поддерживаются.
-  пример: `inn:6617025849 tnved:340220 productname:"сода кальцинированная"`;
+    пример: `inn:6617025849 tnved:340220 productname:"сода кальцинированная"`;
 - или используйте формат `regnumber:1257\16\2023` / `code:6617025849` — наличие `regnumber` всегда отключает семантический блок;
 
 **Дополнительные управляющие слова:**
-  - `debug:on` / `debug` — включает краткий блок «Отладка (кратко)» с последними фильтрами и fallback’ами;
-  - `debug:full` — добавляет JSON-ответ API/семантики целиком;
-  - `debug:summary` / `debug short` — выводит только текстовое резюме без JSON;
-  - `debug:off` — принудительно скрывает отладку даже если она включена по умолчанию;
-  - `max:20` / `rows:50` — задаёт количество строк в таблице (аналог `limit`);
-  - `semantic|` (`семантик|`, `сима|`) — принудительно запускает только семантический поиск.
-  - `сравни` — сравнивает строки: либо одна пара, либо одна строка + список вариантов. Можно быстро проверить, какой признак/название ближе к исходному.
 
-
+- `debug:on` / `debug` — включает краткий блок «Отладка (кратко)» с последними фильтрами и fallback’ами;
+- `debug:full` — добавляет JSON-ответ API/семантики целиком;
+- `debug:summary` / `debug short` — выводит только текстовое резюме без JSON;
+- `debug:off` — принудительно скрывает отладку даже если она включена по умолчанию;
+- `max:20` / `rows:50` — задаёт количество строк в таблице (аналог `limit`);
+- `semantic|` (`семантик|`, `сима|`) — принудительно запускает только семантический поиск.
+- `сравни` — сравнивает строки: либо одна пара, либо одна строка + список вариантов. Можно быстро проверить, какой признак/название ближе к исходному.
 
 ##### **Словарь синонимов**
+
 - Расположен в `services/semantic/synonyms.json` и содержит пары вида `"ключевое слово": ["вариант1", "вариант2"]`.
 - Храните ключи и значения в нижнем регистре, чтобы совпадения учитывались независимо от исходного написания.
 - Файл монтируется как volume, поэтому изменения подхватываются semantic-сервисом **без пересборки контейнера** (достаточно перезапустить: `docker compose restart semantic`).
@@ -541,7 +575,7 @@ docker compose --profile tasks run --rm import
 
 #### `clean_control_params(text)`
 
->- Удаляет строки управления `debug` и `max_rows` из текста
+> - Удаляет строки управления `debug` и `max_rows` из текста
 
 #### `_prepare_param_value(key, val) → str`
 
@@ -563,3 +597,4 @@ docker compose --profile tasks run --rm import
 - [Ansible роль](https://github.com/0x3654/ansible/tree/main/roles/gisp) — Автоматизация деплоя и управления
 
 ---
+
