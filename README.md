@@ -1,15 +1,15 @@
 # **ГИСП реестр, API и Чат для поиска**
 
-[API](https://github.com/0x3654/gisp/actions/workflows/build-api-image.yml)
-[Import](https://github.com/0x3654/gisp/actions/workflows/build-import-image.yml)
-[Semantic](https://github.com/0x3654/gisp/actions/workflows/build-semantic-image.yml)
-[OpenWebUI](https://github.com/0x3654/gisp/actions/workflows/build-openwebui-sync-image.yml)
-[Starter](https://github.com/0x3654/gisp/actions/workflows/build-starter-image.yml)
+[![API](https://github.com/0x3654/gisp/actions/workflows/build-api-image.yml/badge.svg)](https://github.com/0x3654/gisp/actions/workflows/build-api-image.yml)
+[![Import](https://github.com/0x3654/gisp/actions/workflows/build-import-image.yml/badge.svg)](https://github.com/0x3654/gisp/actions/workflows/build-import-image.yml)
+[![Semantic](https://github.com/0x3654/gisp/actions/workflows/build-semantic-image.yml/badge.svg)](https://github.com/0x3654/gisp/actions/workflows/build-semantic-image.yml)
+[![OpenWebUI](https://github.com/0x3654/gisp/actions/workflows/build-openwebui-sync-image.yml/badge.svg)](https://github.com/0x3654/gisp/actions/workflows/build-openwebui-sync-image.yml)
+[![Starter](https://github.com/0x3654/gisp/actions/workflows/build-starter-image.yml/badge.svg)](https://github.com/0x3654/gisp/actions/workflows/build-starter-image.yml)
 
-[Docker Hub](https://hub.docker.com/u/0x3654)
-[License: WTFPL](http://www.wtfpl.net/about/)
-[multi-arch](https://github.com/0x3654/gisp/pkgs/container/gisp-api)
-[Last commit](https://github.com/0x3654/gisp/commits/master)
+[![Docker Hub](https://img.shields.io/badge/docker-0x3654-blue?logo=docker)](https://hub.docker.com/u/0x3654)
+[![License: WTFPL](https://img.shields.io/badge/License-WTFPL-blue?logo=unlicense)](http://www.wtfpl.net/about/)
+[![multi-arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-green)](https://github.com/0x3654/gisp/pkgs/container/gisp-api)
+[![Last commit](https://img.shields.io/github/last-commit/0x3654/gisp)](https://github.com/0x3654/gisp/commits/master)
 
 Поиск по реестру российской промышленной продукции Минпромторга в формате чата с автоматическим обновлением данных и возможностью интеграции с api.
 
