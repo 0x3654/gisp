@@ -19,7 +19,11 @@
 
 Вы получаете поиск двумя способами: строгие фильтры по параметрам и семантический режим поиска по наименованию с расширением синонимами — по умолчанию чат комбинирует оба источника и выводит результаты в едином списке. Подробности выбора режима описаны в разделе [Описание параметров в чате](#описание-параметров-в-чате).
 
-
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/chat-dark.png?v=2">
+  <source media="(prefers-color-scheme: light)" srcset="docs/chat-light.png?v=2">
+  <img alt="Скриншот поиска в чате" src="docs/chat-light.png?v=2">
+</picture>
 
 **Требования**
 
@@ -150,7 +154,11 @@ scripts/
 
 
 
-
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/scheme-dark.png?v=2">
+  <source media="(prefers-color-scheme: light)" srcset="docs/scheme-light.png?v=2">
+  <img alt="Схема сервисов" src="docs/scheme-light.png?v=2">
+</picture>
 
 > ## **Контейнер gisp_pg**
 >
