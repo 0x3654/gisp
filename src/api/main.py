@@ -1,20 +1,47 @@
-import os
 import logging
+import os
 import re
 import time
 from datetime import date
-from re import split as re_split
 from decimal import Decimal
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
-import requests
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
-from psycopg2 import connect
 from psycopg2.extras import RealDictCursor
+
+from _search import (
+    SEMANTIC_URL,  # noqa: F401 - сохраняем как часть публичной поверхности модуля
+    build_filter_clauses,
+    build_tnved_fallback_attempts,
+    extract_query_tokens,
+    fetch_semantic_embedding,
+    get_conn,
+    normalize_regnumber,
+    normalize_synonym_pairs,
+    serialize_dates,
+    split_terms,
+    vector_literal,
+)
+from _hybrid import (
+    HYBRID_DEFAULT_LIMIT,
+    HYBRID_TOPK_PER_CHANNEL,
+    HYBRID_TRGM_THRESHOLD,
+    RERANK_BEFORE_LIMIT,
+    RRF_K,
+    RRF_W_FTS,
+    RRF_W_TRGM,
+    RRF_W_VEC,
+    build_channel_counts_sql,
+    build_hybrid_sql,
+    call_reranker,
+    trgm_normalize_query,
+)
 
 logger = logging.getLogger("uvicorn.error")
 FORCE_SEQSCAN = os.getenv("SEMANTIC_FORCE_SEQSCAN", "0") == "1"
+
+
 def _env_int(name: str, default: int) -> int:
     raw = os.getenv(name)
     if raw is None:
@@ -25,6 +52,7 @@ def _env_int(name: str, default: int) -> int:
         logger.warning("Invalid value for %s: %s. Using default %d.", name, raw, default)
         return default
 
+
 REESTR_MIN_LIMIT = max(1, _env_int("REESTR_MIN_LIMIT", 1))
 REESTR_MAX_LIMIT = max(REESTR_MIN_LIMIT, _env_int("REESTR_MAX_LIMIT", 200))
 REESTR_DEFAULT_LIMIT = min(
@@ -34,219 +62,6 @@ REESTR_DEFAULT_LIMIT = min(
 REESTR_MIN_OFFSET = max(0, _env_int("REESTR_MIN_OFFSET", 0))
 REESTR_DEFAULT_OFFSET = max(REESTR_MIN_OFFSET, _env_int("REESTR_DEFAULT_OFFSET", 0))
 app = FastAPI()
-
-def get_conn():
-    return connect(
-        dbname=os.getenv("POSTGRES_DB"),
-        user=os.getenv("POSTGRES_USER"),
-        password=os.getenv("POSTGRES_PASSWORD"),
-        host=os.getenv("POSTGRES_HOST", "postgres_registry"),
-        port=os.getenv("POSTGRES_PORT", "5432"),
-        options="-c client_encoding=UTF8"
-    )
-
-def serialize_dates(rows):
-    """
-    Преобразует все значения типа date в iso-строки внутри списка словарей.
-    """
-    for row in rows:
-        for key, value in row.items():
-            if isinstance(value, date):
-                row[key] = value.isoformat()
-    return rows
-
-def normalize_regnumber(val: str | None) -> str | None:
-    if not val:
-        return None
-    v = val.strip().strip('"').strip()
-    # приводим разделители к обратному слэшу
-    v = v.replace('/', '\\')
-    return v
-
-def split_terms(value: str) -> list[str]:
-    # Новый разделитель: $ (И), ^ (ИЛИ)
-    parts = re_split(r"[$^]", value)
-    return [p.strip() for p in parts if p.strip()]
-
-def build_filter_clauses(
-    inn: str | None,
-    tnved: str | None,
-    okpd2: str | None,
-    regnumber: str | None,
-    nameoforg: str | None,
-    code: str | None,
-) -> Tuple[List[str], List[str]]:
-    clauses: List[str] = []
-    params: List[str] = []
-    alias = "r."
-
-    if code:
-        code_values = [v.strip() for v in code.split("|") if v.strip()]
-        if code_values:
-            code_conditions = []
-            for v in code_values:
-                code_conditions.append(f"({alias}inn = %s OR {alias}tnved ILIKE %s)")
-                params.extend([v, f"%{v}%"])
-            clauses.append("(" + " OR ".join(code_conditions) + ")")
-
-    if inn:
-        if "|" in inn:
-            inn_values = [v.strip() for v in inn.split("|") if v.strip()]
-            inn_conditions = []
-            for v in inn_values:
-                inn_conditions.append(f"{alias}inn = %s")
-                params.append(v)
-            clauses.append("(" + " OR ".join(inn_conditions) + ")")
-        elif "," in inn:
-            inn_values = [v.strip() for v in inn.split(",") if v.strip()]
-            for v in inn_values:
-                clauses.append(f"{alias}inn = %s")
-                params.append(v)
-        else:
-            clauses.append(f"{alias}inn = %s")
-            params.append(inn)
-
-    if tnved:
-        if "|" in tnved:
-            tnved_values = [v.strip() for v in tnved.split("|") if v.strip()]
-            tnved_conditions = []
-            for v in tnved_values:
-                tnved_conditions.append(f"{alias}tnved ILIKE %s")
-                params.append(f"%{v}%")
-            clauses.append("(" + " OR ".join(tnved_conditions) + ")")
-        elif "," in tnved:
-            tnved_values = [v.strip() for v in tnved.split(",") if v.strip()]
-            for v in tnved_values:
-                clauses.append(f"{alias}tnved ILIKE %s")
-                params.append(f"%{v}%")
-        else:
-            clauses.append(f"{alias}tnved ILIKE %s")
-            params.append(f"%{tnved}%")
-
-    if okpd2:
-        clauses.append(f"{alias}okpd2 ILIKE %s")
-        params.append(f"%{okpd2}%")
-
-    if regnumber:
-        clauses.append(f"({alias}regnumber = %s OR {alias}registernumber = %s)")
-        params.extend([regnumber, regnumber])
-
-    if nameoforg:
-        if "^" in nameoforg:
-            values = split_terms(nameoforg)
-            conds = []
-            for v in values:
-                conds.append(f"{alias}nameoforg ILIKE %s")
-                params.append(f"%{v}%")
-            clauses.append("(" + " OR ".join(conds) + ")")
-        else:
-            values = split_terms(nameoforg)
-            for v in values:
-                clauses.append(f"{alias}nameoforg ILIKE %s")
-                params.append(f"%{v}%")
-
-    return clauses, params
-
-SEMANTIC_URL = os.getenv("SEMANTIC_URL", "http://semantic:8010/semantic_normalize")
-
-
-def _vector_literal(values: List[float]) -> str:
-    return "[" + ", ".join(str(float(v)) for v in values) + "]"
-
-
-def _parse_synonym_entry(entry: object) -> tuple[str | None, str | None]:
-    source: str | None = None
-    variant: str | None = None
-    if isinstance(entry, dict):
-        source = (entry.get("source") or "").strip() or None
-        variant = (entry.get("variant") or "").strip() or None
-        return source, variant
-    if entry is None:
-        return None, None
-    raw = str(entry).strip()
-    if "→" in raw:
-        parts = raw.split("→", 1)
-    elif "->" in raw:
-        parts = raw.split("->", 1)
-    else:
-        return None, None
-    source = parts[0].strip() or None
-    variant_part = parts[1] if len(parts) > 1 else ""
-    variant = variant_part.strip() or None
-    return source, variant
-
-
-def _normalize_synonym_pairs(entries: List[object]) -> List[Dict[str, str]]:
-    normalized: List[Dict[str, str]] = []
-    seen_pairs: set[tuple[str, str]] = set()
-    seen_sources: set[str] = set()
-    for entry in entries:
-        source, variant = _parse_synonym_entry(entry)
-        if not variant:
-            continue
-        if source and variant.lower() == source.lower():
-            # Пропускаем идентичные пары («термоэтикетка» → «термоэтикетка»)
-            continue
-        source_key = (source or "").lower()
-        if source_key and source_key in seen_sources:
-            continue
-        key = (source_key, variant.lower())
-        if key in seen_pairs:
-            continue
-        seen_pairs.add(key)
-        if source_key:
-            seen_sources.add(source_key)
-        normalized.append(
-            {
-                "source": source or "",
-                "variant": variant,
-            }
-        )
-    return normalized
-
-
-
-
-def _fetch_semantic_embedding(
-    text: str, *, normalize: bool, debug: bool = False
-) -> Tuple[str, List[float], List[str], List[str]]:
-    payload = {"text": text, "debug": debug, "normalize": normalize}
-    if not normalize:
-        payload["apply_synonyms"] = True
-    try:
-        resp = requests.post(SEMANTIC_URL, json=payload, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-    except requests.Timeout:
-        raise HTTPException(
-            status_code=504,
-            detail="Semantic service timeout while building embedding.",
-        )
-    except requests.RequestException as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Semantic service unavailable: {exc}",
-        )
-    if not isinstance(data, dict):
-        raise HTTPException(
-            status_code=500,
-            detail="Semantic service returned unexpected payload.",
-        )
-    embedding = data.get("embedding")
-    if not embedding:
-        raise HTTPException(
-            status_code=500,
-            detail="Semantic service did not provide embedding.",
-        )
-    normalized = data.get("normalized") or text
-    synonyms = data.get("synonyms_applied") or []
-    if not isinstance(embedding, list):
-        raise HTTPException(
-            status_code=500,
-            detail="Semantic service returned embedding in invalid format.",
-        )
-    expansions = data.get("synonym_expansions") or []
-    return normalized, embedding, synonyms, expansions
 
 
 @app.get("/reestr/semantic")
@@ -265,10 +80,10 @@ def get_reestr_semantic(
     try:
         regnumber_norm = normalize_regnumber(regnumber)
         user_query_text = text
-        normalized_text, embedding, raw_synonyms, expansions = _fetch_semantic_embedding(
+        normalized_text, embedding, raw_synonyms, expansions = fetch_semantic_embedding(
             text, normalize=False
         )
-        synonyms = _normalize_synonym_pairs(raw_synonyms)
+        synonyms = normalize_synonym_pairs(raw_synonyms)
         synonym_variant_applied: List[Dict[str, str]] = []
         lowered_text = (text or "").lower()
         synonyms_to_apply: List[Dict[str, str]] = []
@@ -287,7 +102,7 @@ def get_reestr_semantic(
                     embedding_new,
                     raw_synonyms_new,
                     expansions_new,
-                ) = _fetch_semantic_embedding(augmented_text, normalize=False)
+                ) = fetch_semantic_embedding(augmented_text, normalize=False)
             except HTTPException:
                 pass
             else:
@@ -295,63 +110,15 @@ def get_reestr_semantic(
                 normalized_text = normalized_text_new
                 embedding = embedding_new
                 expansions = expansions_new
-                synonyms = _normalize_synonym_pairs(raw_synonyms_new)
+                synonyms = normalize_synonym_pairs(raw_synonyms_new)
                 synonym_variant_applied = [
                     {"source": p.get("source", ""), "variant": p.get("variant", "")}
                     for p in synonyms_to_apply
                 ]
-        embedding_literal = _vector_literal(embedding)
+        embedding_literal = vector_literal(embedding)
 
         fetch_limit = max(limit * 2, offset + limit)
-
-        def _is_simple_value(value: str | None) -> bool:
-            return bool(value) and "|" not in value and "," not in value
-
-        def _strip_digits(value: str | None) -> str:
-            return re.sub(r"\D", "", value or "")
-
-        attempts: List[Dict[str, object]] = []
-        attempts_seen: set[tuple[str, str]] = set()
-
-        def _add_attempt(
-            label: str,
-            tnved_value: str | None,
-            code_value: str | None,
-            removed_filters: List[str] | None = None,
-        ) -> None:
-            key = (tnved_value or "", code_value or "")
-            if key in attempts_seen:
-                return
-            attempts_seen.add(key)
-            attempts.append(
-                {
-                    "label": label,
-                    "tnved": tnved_value,
-                    "code": code_value,
-                    "removed_filters": removed_filters or [],
-                }
-            )
-
-        _add_attempt("original", tnved, code)
-
-        tnved_digits = _strip_digits(tnved) if _is_simple_value(tnved) else ""
-        if tnved_digits:
-            original_len = len(tnved_digits)
-            for length in (10, 8, 6, 4):
-                if length < original_len and length >= 4:
-                    candidate = tnved_digits[:length]
-                    _add_attempt(f"tnved_prefix_{length}", candidate, code)
-
-        code_digits = _strip_digits(code) if _is_simple_value(code) else ""
-        if not tnved_digits and code_digits:
-            for length in (10, 8, 6, 4):
-                if len(code_digits) >= length and length >= 4:
-                    candidate = code_digits[:length]
-                    removed = ["code"] if code else []
-                    _add_attempt(f"code_as_tnved_{length}", candidate, None, removed)
-
-        if tnved_digits or tnved:
-            _add_attempt("tnved_removed", None, code, ["tnved"])
+        attempts: List[Dict[str, object]] = build_tnved_fallback_attempts(tnved, code)
 
         query_template = """
             WITH query_vec AS (
@@ -470,24 +237,7 @@ def get_reestr_semantic(
                 if isinstance(value, Decimal):
                     row[key] = float(value)
 
-        token_pattern = re.compile(r"[0-9A-Za-zА-Яа-яЁё№/\\\\\\*-]+")
-        raw_tokens = token_pattern.findall(text.lower())
-        tokens: List[str] = []
-        seen_tokens: set[str] = set()
-        primary_token: str | None = None
-        for raw in raw_tokens:
-            tok = raw.strip()
-            if len(tok) < 2:
-                continue
-            if tok not in seen_tokens:
-                tokens.append(tok)
-                seen_tokens.add(tok)
-            if (
-                primary_token is None
-                and re.search(r"[A-Za-zА-Яа-яЁё]", tok)
-                and not re.search(r"[0-9]", tok)
-            ):
-                primary_token = tok
+        tokens, primary_token = extract_query_tokens(text)
 
         base_token_set = set(tokens)
         synonym_terms: set[str] = set()
@@ -673,6 +423,261 @@ def get_reestr_semantic(
         raise
     except Exception as e:
         logging.exception("Exception occurred in /reestr/semantic endpoint")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/reestr/hybrid")
+def get_reestr_hybrid(
+    request: Request,
+    text: str = Query(..., description="Текст запроса для hybrid-поиска"),
+    limit: int = Query(HYBRID_DEFAULT_LIMIT, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    inn: str | None = Query(None),
+    tnved: str | None = Query(None),
+    okpd2: str | None = Query(None),
+    regnumber: str | None = Query(None),
+    nameoforg: str | None = Query(None),
+    code: str | None = Query(None),
+    diagnostics: bool = Query(False, description="Включить per-channel counters"),
+    rerank: bool = Query(False, description="Прогнать top-K через cross-encoder reranker"),
+):
+    """RRF-фьюжн pgvector + FTS(ru) + pg_trgm. Опционально — cross-encoder reranker.
+
+    Совместим по параметрам фильтров с `/reestr/semantic`. Возвращает строки реестра
+    с дополнительными полями: total_score, sources, vec_distance, fts_score, trgm_score.
+    При rerank=true добавляются rerank_score и rerank_rank.
+    """
+    try:
+        regnumber_norm = normalize_regnumber(regnumber)
+        normalized_text, embedding, raw_synonyms, expansions = fetch_semantic_embedding(
+            text, normalize=False
+        )
+        synonyms = normalize_synonym_pairs(raw_synonyms)
+        embedding_literal = vector_literal(embedding)
+        trgm_query = trgm_normalize_query(text)
+        fts_query = text  # plainto_tsquery сам токенизирует/стеммит
+
+        attempts: List[Dict[str, object]] = build_tnved_fallback_attempts(tnved, code)
+        attempt_history: List[Dict[str, object]] = []
+        final_rows: List[dict] = []
+        final_attempt_index = 0
+        final_clauses: List[str] = []
+        final_params: List[str] = []
+        channel_counts: Dict[str, int] | None = None
+
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                try:
+                    cur.execute("SET ivfflat.probes = %s", (100,))
+                except Exception:
+                    pass
+                try:
+                    cur.execute("SELECT set_limit(%s)", (HYBRID_TRGM_THRESHOLD,))
+                except Exception:
+                    pass
+                if FORCE_SEQSCAN:
+                    try:
+                        cur.execute("SET enable_indexscan = off")
+                        cur.execute("SET enable_bitmapscan = off")
+                    except Exception:
+                        pass
+
+                # При rerank=true дёргаем БД с расширенным LIMIT (top-N для рерангера),
+                # потом усекаем до пользовательского limit после реранка.
+                sql_limit = max(limit + offset, RERANK_BEFORE_LIMIT) if rerank else limit
+                sql_offset = 0 if rerank else offset
+                for idx, attempt in enumerate(attempts):
+                    a_tnved = attempt["tnved"]
+                    a_code = attempt["code"]
+                    a_clauses, a_params = build_filter_clauses(
+                        inn, a_tnved, okpd2, regnumber_norm, nameoforg, a_code
+                    )
+                    sql_text = build_hybrid_sql(
+                        filter_clauses=a_clauses,
+                        topk_per_channel=HYBRID_TOPK_PER_CHANNEL,
+                        rrf_k=RRF_K,
+                        w_vec=RRF_W_VEC,
+                        w_fts=RRF_W_FTS,
+                        w_trgm=RRF_W_TRGM,
+                    )
+                    exec_params: List[object] = [
+                        embedding_literal,
+                        fts_query,
+                        trgm_query,
+                        *a_params,  # vec WHERE
+                        *a_params,  # fts WHERE
+                        *a_params,  # trgm WHERE
+                        sql_limit,
+                        sql_offset,
+                    ]
+                    start_exec = time.perf_counter()
+                    cur.execute(sql_text, exec_params)
+                    rows_candidate = cur.fetchall()
+                    elapsed = time.perf_counter() - start_exec
+
+                    attempt_record: Dict[str, object] = {
+                        "index": idx,
+                        "label": attempt["label"],
+                        "tnved": a_tnved,
+                        "code": a_code,
+                        "rows": len(rows_candidate),
+                        "elapsed": round(elapsed, 3),
+                    }
+                    removed_filters = attempt.get("removed_filters") or []
+                    if removed_filters:
+                        attempt_record["removed_filters"] = removed_filters
+                    attempt_history.append(attempt_record)
+
+                    if rows_candidate:
+                        final_rows = rows_candidate
+                        final_attempt_index = idx
+                        final_clauses = a_clauses
+                        final_params = a_params
+                        break
+
+                if diagnostics:
+                    try:
+                        diag_sql = build_channel_counts_sql(final_clauses)
+                        diag_params = [
+                            fts_query,
+                            *final_params,
+                            trgm_query,
+                            *final_params,
+                        ]
+                        cur.execute(diag_sql, diag_params)
+                        diag = cur.fetchone() or {}
+                        channel_counts = {
+                            "vec_hits": int(diag.get("vec_hits") or 0),
+                            "fts_hits": int(diag.get("fts_hits") or 0),
+                            "trgm_hits": int(diag.get("trgm_hits") or 0),
+                        }
+                    except Exception:
+                        logger.exception("hybrid diagnostics query failed")
+                        channel_counts = None
+
+        _HIDDEN_HYBRID_COLS = ("search_tsv", "productname_normalized")
+        rows = serialize_dates(final_rows)
+        for row in rows:
+            for hidden in _HIDDEN_HYBRID_COLS:
+                row.pop(hidden, None)
+            for key, value in list(row.items()):
+                if isinstance(value, Decimal):
+                    row[key] = float(value)
+                elif isinstance(value, date):
+                    row[key] = value.isoformat()
+            if row.get("total_score") is not None:
+                row["total_score"] = float(row["total_score"])
+            if row.get("vec_distance") is not None:
+                row["vec_distance"] = float(row["vec_distance"])
+            if row.get("fts_score") is not None:
+                row["fts_score"] = float(row["fts_score"])
+            if row.get("trgm_score") is not None:
+                row["trgm_score"] = float(row["trgm_score"])
+
+        rerank_info: Dict[str, object] | None = None
+        if rerank and rows:
+            candidates_payload = [
+                {"id": int(r["id"]), "text": str(r.get("productname") or "")}
+                for r in rows
+            ]
+            start_rr = time.perf_counter()
+            try:
+                rr_resp = call_reranker(text, candidates_payload, top_k=None)
+            except HTTPException as exc:
+                # soft-fail: возвращаем результаты без реранка, помечаем причину
+                logger.warning("rerank soft-failed: %s", exc.detail)
+                rows = rows[offset : offset + limit]
+                rerank_info = {
+                    "applied": False,
+                    "reason": "reranker_unavailable",
+                    "detail": str(exc.detail),
+                }
+                rr_resp = None  # type: ignore[assignment]
+            rr_elapsed = (time.perf_counter() - start_rr) * 1000
+            if rr_resp is None:
+                # soft-fail обработан выше (rerank_info уже выставлен, rows урезаны)
+                rr_resp = {}  # type: ignore[assignment]
+                ranked = []
+            else:
+                ranked = rr_resp.get("ranked") or []
+                score_by_id: Dict[int, Dict[str, float]] = {}
+                for item in ranked:
+                    score_by_id[int(item["id"])] = {
+                        "score": float(item["score"]),
+                        "rank": int(item["rank"]),
+                    }
+                for r in rows:
+                    rid = int(r["id"])
+                    info = score_by_id.get(rid)
+                    if info is not None:
+                        r["rerank_score"] = info["score"]
+                        r["rerank_rank"] = info["rank"]
+                    else:
+                        r["rerank_score"] = None
+                        r["rerank_rank"] = None
+                # сортируем по rerank_rank (ASC); элементы без rank уходят в хвост
+                rows.sort(
+                    key=lambda r: (r.get("rerank_rank") is None, r.get("rerank_rank") or 1_000_000)
+                )
+                # применяем пользовательский offset/limit поверх отсортированных
+                rows = rows[offset : offset + limit]
+                rerank_info = {
+                    "applied": True,
+                    "model": rr_resp.get("model"),
+                    "cached": bool(rr_resp.get("cached", False)),
+                    "elapsed_ms": round(rr_elapsed, 2),
+                    "service_elapsed_ms": rr_resp.get("elapsed_ms"),
+                    "candidates": len(candidates_payload),
+                }
+        elif rerank and not rows:
+            rerank_info = {"applied": False, "reason": "no candidates"}
+
+        final_attempt = attempts[final_attempt_index]
+        hybrid_block: Dict[str, object] = {
+            "original_query": text,
+            "normalized_query": normalized_text,
+            "trgm_query": trgm_query,
+            "synonyms": expansions,
+            "synonym_pairs": synonyms,
+            "rrf": {
+                "k": RRF_K,
+                "weights": {"vec": RRF_W_VEC, "fts": RRF_W_FTS, "trgm": RRF_W_TRGM},
+                "topk_per_channel": HYBRID_TOPK_PER_CHANNEL,
+                "trgm_threshold": HYBRID_TRGM_THRESHOLD,
+            },
+            "fallback_used": final_attempt_index > 0,
+            "fallback_attempts": attempt_history,
+            "active_filters": {
+                "inn": inn,
+                "tnved": final_attempt.get("tnved"),
+                "okpd2": okpd2,
+                "regnumber": regnumber_norm,
+                "code": final_attempt.get("code"),
+                "nameoforg": nameoforg,
+            },
+        }
+        removed_filters = final_attempt.get("removed_filters") or []
+        if removed_filters:
+            hybrid_block["fallback_removed_filters"] = list(removed_filters)
+        if channel_counts is not None:
+            hybrid_block["channels"] = channel_counts
+        if rerank_info is not None:
+            hybrid_block["rerank"] = rerank_info
+
+        return JSONResponse(
+            content={
+                "rows": rows,
+                "limit": limit,
+                "offset": offset,
+                "count": len(rows),
+                "hybrid": hybrid_block,
+            },
+            media_type="application/json",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception("Exception occurred in /reestr/hybrid endpoint")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
