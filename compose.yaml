@@ -28,10 +28,14 @@ services:
     networks:
        - internal
   api:
-    image: docker.io/0x3654/gisp-api:latest
+    build:
+      context: .
+      dockerfile: src/api/Dockerfile
+    image: gisp-api:local
     container_name: gisp_api
+    # watchtower отключён для api — иначе он перетирает локальный билд upstream-образом
     labels:
-      - com.centurylinklabs.watchtower.enable=true
+      - com.centurylinklabs.watchtower.enable=false
     env_file: .env
     environment:
       - TZ=${TZ:-Europe/Moscow}
@@ -107,6 +111,30 @@ services:
       timeout: 5s
       retries: 5
       start_period: 90s
+    restart: unless-stopped
+    networks:
+      - internal
+      - external
+  # Прокси перед openwebui для совместимости со старой 1С-обработкой:
+  # инжектирует chat_id/id в /api/chat/completions, иначе новая версия openwebui
+  # падает в middleware ('NoneType' has no attribute 'startswith').
+  owui-proxy:
+    build:
+      context: src/owui_proxy
+      dockerfile: Dockerfile
+    image: gisp-owui-proxy:local
+    container_name: gisp_owui_proxy
+    labels:
+      - com.centurylinklabs.watchtower.enable=false
+    environment:
+      - UPSTREAM=http://openwebui:8080
+      - PROXY_TIMEOUT=${PROXY_TIMEOUT:-300}
+      - PROXY_LOG_BODY=${PROXY_LOG_BODY:-1}
+    ports:
+      - '${OWUI_PROXY_PORT:-3334}:8080'
+    depends_on:
+      openwebui:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - internal
@@ -211,6 +239,115 @@ services:
     restart: unless-stopped
     networks:
       - internal
+  # Cross-encoder reranker (BAAI/bge-reranker-v2-m3, 568M params, ONNX).
+  # Запуск:
+  #   docker compose --profile rerank build reranker   # ~10-20 мин на скачку+экспорт ONNX
+  #   docker compose --profile rerank up -d reranker
+  reranker:
+    build:
+      context: .
+      dockerfile: src/reranker/Dockerfile.onnx
+    image: gisp-reranker:local
+    container_name: gisp_reranker
+    profiles:
+      - rerank
+    env_file: .env
+    environment:
+      - TZ=${TZ:-Europe/Moscow}
+      - RERANKER_PORT=${RERANKER_PORT:-8020}
+      - RERANKER_BACKEND=${RERANKER_BACKEND:-onnx-fp32}
+      - RERANKER_MAX_LEN=${RERANKER_MAX_LEN:-512}
+      - RERANKER_MAX_PAIRS=${RERANKER_MAX_PAIRS:-50}
+      - RERANKER_CACHE_TTL_SECONDS=${RERANKER_CACHE_TTL_SECONDS:-86400}
+    command:
+      - uvicorn
+      - reranker_service:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "${RERANKER_PORT:-8020}"
+      - --workers
+      - "${RERANKER_WORKERS:-1}"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python
+        - -c
+        - |
+          import socket, sys, os
+          try:
+              s = socket.socket()
+              s.connect(("127.0.0.1", int(os.getenv("RERANKER_PORT", "8020"))))
+              s.close()
+          except Exception:
+              sys.exit(1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    depends_on:
+      postgres_registry:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
+  # Reasoning agent (LLM + tool use, SSE-streaming).
+  # Запуск:
+  #   docker compose --profile matcher build matcher
+  #   docker compose --profile matcher up -d matcher
+  matcher:
+    build:
+      context: .
+      dockerfile: src/matcher/Dockerfile
+    image: gisp-matcher:local
+    container_name: gisp_matcher
+    profiles:
+      - matcher
+    env_file: .env
+    environment:
+      - TZ=${TZ:-Europe/Moscow}
+      - MATCHER_PORT=${MATCHER_PORT:-8030}
+      - REGISTRY_API_BASE=http://api:8000
+      - POSTGRES_HOST=postgres_registry
+      - REASONER_PROVIDER=${REASONER_PROVIDER:-local}
+      - REASONER_MODEL=${REASONER_MODEL:-qwen3-32b}
+      - REASONER_API_BASE=${REASONER_API_BASE:-}
+      - REASONER_API_KEY=${REASONER_API_KEY:-}
+      - REASONER_TIMEOUT=${REASONER_TIMEOUT:-60}
+      - REASONER_MAX_ITERATIONS=${REASONER_MAX_ITERATIONS:-5}
+      - REASONER_MAX_TOOL_CALLS=${REASONER_MAX_TOOL_CALLS:-10}
+      - REASONER_CONFIDENCE_THRESHOLD=${REASONER_CONFIDENCE_THRESHOLD:-0.7}
+      - REASONER_TOKEN_BUDGET=${REASONER_TOKEN_BUDGET:-32000}
+      - REASONER_ESCALATION_MODEL=${REASONER_ESCALATION_MODEL:-claude-sonnet-4-6}
+      - REASONER_ESCALATION_API_KEY=${REASONER_ESCALATION_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python
+        - -c
+        - |
+          import socket, sys, os
+          try:
+              s = socket.socket()
+              s.connect(("127.0.0.1", int(os.getenv("MATCHER_PORT", "8030"))))
+              s.close()
+          except Exception:
+              sys.exit(1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      postgres_registry:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
+      - external
   embeddings-worker:
     image: docker.io/0x3654/gisp-semantic-onnx:latest
     #container_name: gisp_embeddings-worker
@@ -241,6 +378,61 @@ services:
     deploy:
       restart_policy:
         condition: none
+  # Раннер миграций для существующих БД (hybrid-поиск и далее).
+  # Запуск:
+  #   docker compose --profile migrations build migrations
+  #   docker compose --profile migrations run --rm migrations
+  # Поведение управляется env: MIGRATION_FILES, BATCH_SIZE, ONLY_MISSING, SKIP_BACKFILL, SKIP_INDEXES.
+  migrations:
+    build:
+      context: .
+      dockerfile: src/migrations/Dockerfile
+    image: gisp-migrations:local
+    profiles:
+      - migrations
+    env_file: .env
+    environment:
+      - TZ=${TZ:-Europe/Moscow}
+      - POSTGRES_HOST=postgres_registry
+      - MIGRATION_FILES=${MIGRATION_FILES:-051_hybrid_backfill.sql}
+      - BATCH_SIZE=${MIGRATION_BATCH_SIZE:-10000}
+      - ONLY_MISSING=${MIGRATION_ONLY_MISSING:-1}
+      - SKIP_BACKFILL=${MIGRATION_SKIP_BACKFILL:-0}
+      - SKIP_INDEXES=${MIGRATION_SKIP_INDEXES:-0}
+    volumes:
+      - ./services/migrations:/migrations:ro
+    depends_on:
+      postgres_registry:
+        condition: service_healthy
+    networks:
+      - internal
+    restart: "no"
+  # Golden-snapshot тесты для search-эндпоинтов.
+  # Запуск:
+  #   docker compose --profile tests run --rm api-tests --mode capture   # зафиксировать baseline
+  #   docker compose --profile tests run --rm api-tests --mode verify    # проверить отсутствие регрессий
+  # Сервис use stdlib only (urllib), внешние зависимости не нужны.
+  api-tests:
+    image: docker.io/0x3654/gisp-api:latest
+    profiles:
+      - tests
+    env_file: .env
+    environment:
+      - TZ=${TZ:-Europe/Moscow}
+      - API_BASE=http://api:8000
+      - PYTHONDONTWRITEBYTECODE=1
+    working_dir: /tests
+    volumes:
+      - ./tests:/tests
+    entrypoint:
+      - python
+      - /tests/golden/run.py
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - internal
+    restart: "no"
   starter-dump:
     image: docker.io/0x3654/gisp-starter:latest
     container_name: gisp_starter_dump

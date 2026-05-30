@@ -27,6 +27,13 @@ workflow.excalidraw
 # Python cache in src/
 src/**/__pycache__/
 src/**/*.pyc
+
+# Tests & eval (локальные: зависят от данных конкретной БД, для работы сервиса не нужны)
+tests/
+
+# 1C processing sources (содержат токены/локальные обработки)
+*.bsl
+1c_processing/*.txt
 promt.md
 
 DOCKER_OPTIMIZATION_PLAN.md

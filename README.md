@@ -416,6 +416,64 @@ docker compose --profile tasks run --rm import
 
 ---
 
+# I-bis. Hybrid search (preview, в разработке)
+
+> **Статус:** разработка в ветке `mark3`. Ниже описаны три новых слоя, которые добавляются поэтапно поверх существующих `/reestr` и `/reestr/semantic`. Текущие эндпоинты и пайплайны остаются без изменений.
+
+## Цель
+
+Закрыть оставшиеся ~20% сложных случаев матчинга наименований из внешних баз к реестру (модификации одного изделия, неполные данные, опечатки, конфликт сигналов «семантика vs артикул»). Текущие direct- и semantic-эндпоинты закрывают ~80%.
+
+## Архитектура (планируется)
+
+```
+запрос ──► /reestr/hybrid ──► [pgvector] ─┐
+                              [FTS ru]   ─┼─► RRF fusion (top-50) ──► [optional]
+                              [pg_trgm]  ─┘                          ──► reranker ──► top-10
+                                                                                       │
+                                                                  ┌────────────────────┘
+                                                                  ▼
+                                                          confidence / gap анализ
+                                                                  │
+                                                ┌─────────────────┼──────────────────┐
+                                                ▼                 ▼                  ▼
+                                          direct match      LLM agent loop      no_match
+                                                            (Qwen3-32B L1
+                                                            + Claude L2 эск.)
+                                                                  │
+                                                                  ▼
+                                                          /reestr/match (SSE)
+```
+
+## Шаги внедрения
+
+| Шаг | Что добавляется | Когда |
+|---|---|---|
+| 0 | Подготовка: `CREATE EXTENSION pg_trgm`, `src/api/_search.py` (общие хелперы), golden-snapshot тесты для `/reestr/semantic` | сейчас |
+| 1 | Эндпоинт `GET /reestr/hybrid` — RRF-фьюжн pgvector + FTS + триграммы; миграция (search_tsv, productname_normalized) через backfill в батчах + trigger | следующий |
+| 2 | Сервис `reranker` (BAAI/bge-reranker-v2-m3, ONNX-INT8 по умолчанию); параметр `rerank=true` у `/reestr/hybrid` | по запросу |
+| 3 | Сервис `matcher` — reasoning-агент с tool use; `POST /reestr/match` со SSE-стримингом; двухуровневая эскалация L1 (локальный Qwen3-32B) → L2 (Claude Sonnet 4.6) | по запросу |
+| 4 | Новый OpenWebUI pipe `reestr_match_*` с парсингом SSE и видимыми tool calls (UX как Claude plugin в Cursor) | по запросу |
+| 5 | Eval-фреймворк (Recall@K, MRR, hard-case precision, latency, cost) | параллельно |
+
+Подробный план с чек-боксами — в `docs/HYBRID_RERANK_AGENT_PLAN.md` (gitignored, локальный трекер).
+
+## Тестирование без регрессий
+
+Golden-snapshot тесты для `/reestr/semantic` (контейнер `api-tests` под профилем `tests`):
+
+```bash
+# baseline (один раз до изменений)
+docker compose --profile tests run --rm api-tests --mode capture
+
+# проверка после изменений
+docker compose --profile tests run --rm api-tests --mode verify
+```
+
+Snapshots сохраняются в `tests/golden/snapshots/` и должны коммититься. Изменения там — сигнал, что выдача `/reestr/semantic` изменилась; нужно осознанно подтвердить или откатить.
+
+---
+
 # II. Обработка сообщений в чате
 
 **Описание:**
