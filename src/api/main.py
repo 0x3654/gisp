@@ -302,7 +302,10 @@ def get_reestr_semantic(
                 ]
         embedding_literal = _vector_literal(embedding)
 
-        fetch_limit = max(limit * 2, offset + limit)
+        # Дно пула кандидатов: при дефолтном limit=10 fetch_limit=20 был слишком мал —
+        # токен-богатые записи с большой векторной дистанцией не попадали в пул и не
+        # доходили до сортировки (-token_matches, distance). 200 ловит их за ~+30мс.
+        fetch_limit = max(limit * 2, offset + limit, 200)
 
         def _is_simple_value(value: str | None) -> bool:
             return bool(value) and "|" not in value and "," not in value
