@@ -51,12 +51,6 @@ curl -fsSL https://raw.githubusercontent.com/0x3654/gisp/master/scripts/bootstra
 
 ### Рекомендуемая схема управления
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/scheme-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/scheme-light.png">
-  <img alt="Схема управления" src="docs/scheme-light.png">
-</picture>
-
 Semaphore хранит расписание и секреты. downloader запускается по крону, по завершении сам триггерит import и embeddings через Semaphore API — без фиксированных временных окон между шагами.
 
 **Что нужно настроить в Semaphore:**
